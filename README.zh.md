@@ -57,6 +57,10 @@ DSH 会话日志是拼接多帧 zstd 的 JSONL，加载器要求每一行的 `se
   `ok` / `corrupt` / `unreadable` / `torn` / `live`，支持单个**修复**与**一键修复全部**。
   按钮沿用宿主侧边栏的几何：宽模式 42px 行高 / 12px 圆角 / 28px 圆形徽标，窄栏
   为 36px 圆形按钮，与同插槽的其它入口和设置按钮对齐。
+- **宿主设置分区页**（`settings.section`）：**设置 → 会话日志修复** 页承载
+  「在菜单中显示」开关（默认开启）+ **打开会话修复** 按钮。关掉开关后侧栏入口
+  渲染 null（不占位），该页就是重新进入弹框的唯一入口；弹框 body 顶部也有同一个
+  开关，两处读同一偏好源，改一处即时同步。
 - **模型工具**：`dsh_session_log_repair_scan`、`dsh_session_log_repair_apply`
   （`session` / `all` / `dryRun` / `force`）、`dsh_session_log_repair_verify`。
 - **命令**：`/dsh-session-log-repair {"op":"scan|repair|verify|status", …}`。
@@ -226,7 +230,18 @@ Publishing**（OIDC，`id-token: write`），不存长期 token，与 `dsh-jenki
 - peer 依赖（`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-tools`）是可选的：缺失也能工作，
   后端不是 JSONL 时状态会报 `unsupported`。
 - **不修改**官方 `deepseek-harness`：全部使用既有服务（`tools`、`commands`、`skills`、
-  `webServer`）与插槽（`sidebar.footer.action`、`shell.overlay`）。
+  `webServer`）与插槽（`sidebar.footer.action`、`settings.section`、`shell.overlay`）。
+- **样式隔离**：注入的样式表除一条刻意保留的例外，全部限定在 `.dshsr-*` 作用域内 ——
+  `:where(div:has(> [data-slot="sidebar.footer.action"] > .dshsr-footer-group)){flex-direction:column}`
+  用于把宿主 footer 容器从默认 flex 横排改为纵向堆叠（否则多个插件入口会被挤在一行）。
+  它只可能命中「容器内已存在本插件入口」的那一层，且外层 `:where()` 把优先级压到 0，
+  宿主随时可覆盖。style 标签带 `id="dshsr-styles"` 标记；没有其它全局选择器，
+  不写 `:root`/`body`/`*`，也不修改 body 行内样式。
+- **弹框配色**：修复弹框与 dsh-get-balance 同一套 —— `rgba(0,0,0,.32)` 蒙版 + `blur(12px) saturate(1.2)`、
+  `color-mix(bg-layer-1 78%)` 玻璃面板 + `border-l2` 细描边 + 14px 圆角、`border-l1` 分隔线、
+  主操作按钮实心 `button-primary-fill`、`ok`/`corrupt`/`torn` 徽章走 `state-success/error/warn` 令牌。
+  宿主只定义了 `--dsw-alias-*` 一族：此前的 `var(--dsw-color-surface,#1b1b1f)` 会回退成近黑面板，
+  浅色主题下叠加继承来的深色文字完全不可读。
 
 ## 许可证
 

@@ -73,6 +73,12 @@ Two cases are deliberately refused: a **real gap** (`got > expected`) and a
   per-session **修复** plus **一键修复全部**. The entry keeps the host sidebar
   geometry — 42px row, 12px radius, 28px round badge, 36px circle in the rail —
   so it lines up with the sibling footer entries and the settings trigger.
+- **Host settings page** (`settings.section`): **Settings → Session log repair**
+  carries the **在菜单中显示 / Show in menu** switch (default on) plus an **Open
+  session repair** button. Turning the switch off hides the footer entry — which
+  then renders nothing, not a placeholder — and this page remains the way back
+  into the dialog. The same switch also sits at the top of the dialog body; both
+  read one preference source, so either one updates the other immediately.
 - **Model tools**: `dsh_session_log_repair_scan`, `dsh_session_log_repair_apply`
   (`session` / `all` / `dryRun` / `force`), `dsh_session_log_repair_verify`.
 - **Command**: `/dsh-session-log-repair {"op":"scan|repair|verify|status", …}`.
@@ -269,6 +275,20 @@ publishes automatically.
 - Peer dependencies (`@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-tools`) are
   optional: the plugin works without them and reports `unsupported` when the
   backend is not the JSONL one.
+- **Style isolation**: every rule in the injected stylesheet is scoped to `.dshsr-*`
+  with one deliberate exception — `:where(div:has(> [data-slot="sidebar.footer.action"] > .dshsr-footer-group)){flex-direction:column}`,
+  which stacks the host footer container (the host lays it out as a flex **row**, so
+  several plugin entries would squeeze onto one line). It can only match a container
+  that already holds **this plugin's own entry**, and `:where()` drops its specificity
+  to 0 so the host can always override it. The style tag is marked `id="dshsr-styles"`;
+  no other global selector, no `:root`/`body`/`*` rule, no body-style mutation.
+- **Dialog palette**: the repair dialog follows dsh-get-balance — a `rgba(0,0,0,.32)`
+  scrim with `blur(12px) saturate(1.2)`, a `color-mix(bg-layer-1 78%)` glass panel
+  with a `border-l2` hairline and 14px radius, `border-l1` dividers, solid
+  `button-primary-fill` for the primary action, and `state-success/error/warn`
+  tokens for the `ok` / `corrupt` / `torn` badges. The host defines only the
+  `--dsw-alias-*` family — the earlier `var(--dsw-color-surface,#1b1b1f)` resolved
+  to a near-black panel with inherited dark text on the light theme.
 - The official `deepseek-harness` project is **not modified**; everything uses
   existing services (`tools`, `commands`, `skills`, `webServer`) and slots
   (`sidebar.footer.action`, `shell.overlay`).
