@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-log-repair",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "jsoncode",
   "license": "MIT",
   "description": "DSH session-log repair plugin: scan every stored session, detect a seq collision in the committed region or a torn trailing record, and repair it from a one-click Web UI, model tools, or the /dsh-session-log-repair command. Installing it also registers its bundled dsh-session-log-repair skill (offline doctrine and scripts).",
