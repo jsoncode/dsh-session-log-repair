@@ -3,8 +3,11 @@
  * Scan every stored DSH session log for the corruption the repair tool fixes.
  *
  * Reports one line per session: OK, COLLISION (repairable), or BROKEN (refused).
- * A session whose log file is currently held by a running process is skipped —
- * never rewrite a log a live writer owns.
+ * COLLISION covers both loader refusals the repair handles: a seq gap in the
+ * committed region, and the generic torn-record message (a seq regression no
+ * later turn/end escalates, or a trailing record without its newline). A session
+ * whose log file is currently held by a running process is skipped — never
+ * rewrite a log a live writer owns.
  *
  * Usage:
  *   node --import tsx/esm scan-sessions.mjs [--root <sessions-dir>] [--host-root <dir>] [--json]
@@ -77,6 +80,11 @@ for (const artifact of discover()) {
   try {
     const { plaintext, frames } = await plaintextOf(artifact.path, artifact.compressed)
     const scanned = scanLog(plaintext)
+    // scanLog tolerates a trailing record without a newline and a seq regression
+    // no later turn/end escalates; the loader refuses both, so check the cursor.
+    if (scanned.committedBytes !== plaintext.length) {
+      throw new Error('corrupt Zstandard session log: complete frame contains a torn JSONL record')
+    }
     entry.events = scanned.events.length
     entry.maxSeq = scanned.events.length - 1
     if (frames !== undefined) entry.frames = frames
@@ -84,6 +92,7 @@ for (const artifact of discover()) {
     const message = error instanceof Error ? error.message : String(error)
     entry.message = message
     entry.status = /seq gap in committed region/.test(message) && /got (\d+)\)/.test(message)
+      || /complete frame contains a torn JSONL record/.test(message)
       ? 'collision'
       : 'broken'
   }

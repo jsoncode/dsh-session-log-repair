@@ -1,28 +1,44 @@
 ---
 name: dsh-session-log-repair
-description: Use when a DeepSeek Harness (DSH) session cannot load its history — Web GUI shows "历史加载失败", or the error mentions "failed to observe session", "corrupt session log" with a seq gap in the committed region, duplicate or rewound seq values, a corrupt session.jsonl.zstd, or a session log written by two writers after a crash or an LLM-retry backoff. Also use to inspect a DSH session log's frames, events, seq density, and turn boundaries.
+description: Use when a DeepSeek Harness (DSH) session cannot load its history — Web GUI shows "历史加载失败", or the error mentions "failed to observe session", "corrupt session log" with a seq gap in the committed region, "complete frame contains a torn JSONL record", duplicate or rewound seq values, a corrupt session.jsonl.zstd, or a session log written by two writers after a crash or an LLM-retry backoff. Also use to inspect a DSH session log's frames, events, seq density, and turn boundaries.
 ---
 
-# DSH 会话日志修复（重复 seq / 回退行）
+# DSH 会话日志修复（重复 seq / 回退行 / 尾部不完整记录）
 
 DSH 的会话日志是「多帧 zstd 拼接的 JSONL」。读取时 `SessionLogScanner` 要求每个事件的
-`seq` 严格等于已累计事件数；一旦发现不一致就拒载**整个**日志。GUI 里表现为
-「历史加载失败：failed to observe session "…": corrupt session log: seq gap in committed
-region at line N (expected X, got Y)（gateway/internal）」。
+`seq` 严格等于已累计事件数；一旦发现不一致就拒载**整个**日志。GUI 里表现为两类消息：
 
-本 skill 只处理**重复/回退行**（`got < expected`）。真正的缺行（`got > expected`）和截断尾帧
-由其它机制处理，工具会明确拒绝。
+```
+历史加载失败：failed to observe session "…": corrupt session log: seq gap in committed
+region at line N (expected X, got Y)（gateway/internal）
 
-## 1. 症状分型（先看 `expected` 与 `got`）
+历史加载失败：failed to observe session "…": corrupt Zstandard session log: complete
+frame contains a torn JSONL record（gateway/internal）
+```
+
+第二条是**通用**消息：只要「完整帧里有消费不掉的记录」就会用它，因此它同时覆盖
+（a）末尾缺换行的半条记录、（b）seq 回退但**其后没有任何 `turn/end`** 的撞车行。两者都能修，
+修法不同（见 §1、§4）。
+
+本 skill 只处理**重复/回退行**（`got < expected`）与**末尾半条记录**。真正的缺行
+（`got > expected`）和截断尾帧由其它机制处理，工具会明确拒绝。
+
+## 1. 症状分型
 
 | 现象 | 含义 | 本工具 |
 |---|---|---|
-| `got < expected`（如 expected 29548, got 29546） | 某行 seq 回退/重复：有陈旧写入者把旧计数器的新事件盖在已提交区上 | ✅ 可修 |
+| `seq gap in committed region`，`got < expected` | 某行 seq 回退/重复：陈旧写入者把旧计数器的新事件盖在已提交区上，且其后有 `turn/end` 触发精确报错 | ✅ 可修 |
+| `complete frame contains a torn JSONL record`（回退行在末尾） | **同一种撞车**，但撞车行之后没有 `turn/end`，扫描器只记 issue 不升级，最后按「有消费不掉的记录」报出 | ✅ 可修（同一套存活链规则） |
+| `complete frame contains a torn JSONL record`（末尾半条 JSON） | 写入者写完记录字节、没写换行就死了；帧本身完整 | ✅ 可修（丢掉最后一个换行符之后的字节） |
 | `got > expected` | 真的缺行 | ❌ 拒绝（需要别的恢复手段） |
-| 尾帧不完整 | torn tail | ❌ 拒绝：先让 DSH 正常加载/恢复一次，再运行 |
+| 结构上不完整的**尾帧**（`tornStart` 存在） | torn tail：宿主自己会恢复其中的完整记录 | ❌ 拒绝：先让 DSH 正常加载/恢复一次，再运行 |
+
+区分「回退行」与「半条记录」不用靠猜：解码后按行解析，末尾字节不是 `\n` 就是半条记录；
+所有行都能解析却仍报错，就是回退行。
 
 报错信息里的 `line N` 是**事件行号**（不含 header 行），且它是**问题首次出现**的位置；
-真正抛错发生在之后第一条含 `turn/end` 的行。行号相差 1 是正常的（文件行 = 事件行 + 1）。
+在第一种形态下真正抛错发生在之后第一条含 `turn/end` 的行，行号相差 1 是正常的
+（文件行 = 事件行 + 1）。第二种形态没有行号，因为它是整段拒绝。
 
 ## 2. 容器与校验规则（读日志前必须知道的契约）
 
@@ -67,6 +83,21 @@ region at line N (expected X, got Y)（gateway/internal）」。
    第一个 seq）。
 
 **成因 B**：手工/脚本写日志、复制粘贴行、进程被强杀后由外部工具补写。
+
+**成因 C：末尾半条记录（torn record）**
+
+写入者把一条记录的字节写进了当前帧，但换行符还没落盘就死了（或被强杀在两次 write 之间）。
+帧本身是完整的（zstd 帧头 + 校验和齐全），所以宿主不会把它当「尾帧不完整」恢复，而是按
+「完整帧里有半条记录」拒载整个日志。识别方法：解码所有完整帧后，明文末尾不是 `\n`，
+最后一个换行符之后还有字节。这些字节从来没成为过一个事件，丢掉它们不会丢事件。
+
+**成因 D：回退行落在文件末尾**
+
+同一批撞车里，如果回退行之后**再没有** `turn/end`（例如最后一条就是陈旧写入者补的
+一行），扫描器不会在 `consumeEventLine` 里抛精确错误，只留下 issue，最后统一报成
+`complete frame contains a torn JSONL record`。实测样本：2101 行、46011 事件的会话，第 38
+文件行是一条 `tool/result seq 112`，而前面已提交到 seq 115；其后 2000+ 行全是
+`assistant/chunk`，没有任何 `turn/end`。修法与成因 A 完全一致（存活链）。
 
 ## 4. 修复流程
 
@@ -140,11 +171,13 @@ node --import tsx/esm "scripts/verify-repaired-session.mjs" --file $f
 `--apply` 会把原始文件复制到 `<cwd>/.session-backups/<session>-<ts>/`；建议用
 `--backup-dir` 指到 sessions 树**之外**（备份目录若长得像会话目录会干扰列表）。
 
-退出码：`0` 成功；`1` 拒绝（会说明原因：真缺行 / torn tail / 修完仍不能加载）。
+退出码：`0` 成功；`1` 拒绝（会说明原因：真缺行 / 不完整尾帧 / 修完仍不能加载）。
 
 ### 修复做了什么
 
 - 逐帧解压 → 用宿主 `decodeStorageRecord` 展开每行的 seq 范围；
+- **先去掉末尾半条记录**（最后一个 `\n` 之后的字节，成因 C）。它从未成为事件，丢弃不丢数据；
+  之后所有行都必须是完整 JSON 记录，否则拒绝（那是真损坏，不是本工具的范围）；
 - **从文件末尾向前确定「存活链」**：先取到达文件末尾的最大稠密连续段（尾部），再向前延伸——某行
   `end === 链起点 - 1` 就并进链；某行 `end >= 链起点` 就是重复版本，丢弃；出现真缺口则停下并要求
   剩余部分是稠密前缀，否则拒绝；
@@ -152,7 +185,7 @@ node --import tsx/esm "scripts/verify-repaired-session.mjs" --file $f
   事件」的判定，所以两个版本都是真实写入时同样适用；
 - 保持帧布局重建（第 1 帧仍是 header 单帧，被清空的帧整帧丢弃），每帧重新用
   `compressZstdFrame` 压缩；临时文件 + fsync + `rename` 原子替换；
-- 修完 `maxSeq` 不变（如 42849 / 53131 / 278692 / 181581），因此所有以绝对 seq 为参照的缓存仍然有效。
+- 修完 `maxSeq` 不变（如 42849 / 53131 / 278692 / 181581 / 46010），因此所有以绝对 seq 为参照的缓存仍然有效。
 
 ### 修复后还要检查
 

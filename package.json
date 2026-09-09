@@ -51,7 +51,8 @@
     "test:client": "node scripts/client-smoke.mjs",
     "test:install": "node scripts/install-smoke.mjs",
     "install:profile": "node scripts/install.mjs --profile web",
-    "uninstall:profile": "node scripts/install.mjs --profile web --uninstall"
+    "uninstall:profile": "node scripts/install.mjs --profile web --uninstall",
+    "release": "npm test && npm version patch -m \"release: v%s\" && git push --follow-tags"
   },
   "dsh": {
     "bundle": {

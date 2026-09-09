@@ -58,13 +58,26 @@ function isFree(path) {
 
 async function inspect(path, compressed) {
   const bytes = readFileSync(path)
-  if (!compressed) { scanLog(bytes); return }
+  if (!compressed) return assertConsumed(scanLog(bytes), bytes.length)
   const { frames, tornStart } = scanZstdFrames(bytes)
   if (frames.length === 0) throw new Error('no complete zstd frame')
   if (tornStart !== undefined) throw new Error(`incomplete final frame at byte ${tornStart}`)
   const parts = []
   for (const range of frames) parts.push(await decompressZstdFrame(bytes.subarray(range.start, range.end)))
-  scanLog(Buffer.concat(parts))
+  const plaintext = Buffer.concat(parts)
+  assertConsumed(scanLog(plaintext), plaintext.length)
+}
+
+/**
+ * The loader refuses a log whose scanner could not consume every byte; `scanLog`
+ * only records that as an issue, so surface it the way the loader does.
+ * @param scan - the scan result for the decoded plaintext.
+ * @param byteLength - the plaintext's length.
+ */
+function assertConsumed(scan, byteLength) {
+  if (scan.committedBytes !== byteLength) {
+    throw new Error('corrupt Zstandard session log: complete frame contains a torn JSONL record')
+  }
 }
 
 function discover() {
@@ -96,7 +109,7 @@ for (const artifact of discover()) {
   }
   summary.corrupt.push({ id: artifact.id, path: artifact.path, message })
 
-  if (!/seq gap in committed region/.test(message)) {
+  if (!/seq gap in committed region|complete frame contains a torn JSONL record/.test(message)) {
     summary.failed.push({ id: artifact.id, path: artifact.path, reason: message })
     continue
   }

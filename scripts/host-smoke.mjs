@@ -51,6 +51,9 @@ function buildCleanLog(id, cwd, createdAt) {
   return `${lines.join('\n')}\n`
 }
 
+/** A record truncated before its newline: the torn-tail signature. */
+const TORN_FRAGMENT = '{"type":"turn/start","seq":6,"time":1'
+
 /**
  * Corrupt a clean log the way the real incidents looked: a stalled writer
  * resumes and re-appends a block whose seqs collide with the committed tail.
@@ -66,6 +69,30 @@ function buildStaleTail(clean, createdAt) {
     { type: 'turn/end', seq: 5, time: createdAt + 101, data: { reason: { kind: 'completed' } } },
   ]
   return `${clean}${stale.map(event => JSON.stringify(event)).join('\n')}\n`
+}
+
+/**
+ * Signature 2: one stale row after the committed tail, with no `turn/end`
+ * after it. The loader records the seq gap but never escalates it, so the
+ * session surfaces as the generic `complete frame contains a torn JSONL record`
+ * message instead of the seq-gap one.
+ * @param clean - clean JSONL text (header + 6 rows).
+ * @param createdAt - timestamp used to keep the appended row plausible.
+ * @returns the corrupted JSONL text.
+ */
+function buildHiddenSeqGap(clean, createdAt) {
+  const stale = { type: 'sandbox/mode', seq: 3, time: createdAt + 100, data: { mode: 'read-only' } }
+  return `${clean}${JSON.stringify(stale)}\n`
+}
+
+/**
+ * Signature 3: a record whose newline never landed inside an otherwise complete
+ * frame — the loader sees the frame as complete but the trailing record as torn.
+ * @param clean - clean JSONL text (header + 6 rows).
+ * @returns the corrupted JSONL text.
+ */
+function buildTornRecord(clean) {
+  return `${clean}${TORN_FRAGMENT}`
 }
 
 /**
@@ -229,6 +256,62 @@ try {
   expect(againText.includes('无冲突') || againText.includes('clean'), `second repair must be a no-op: ${againText}`)
   const sizeAfter = readFileSync(fixtureFile).length
 
+  // ── 3b. The other two signatures of the same loader refusal ────────────
+  // Both surface as the generic `complete frame contains a torn JSONL record`
+  // message: a seq regression no later turn/end escalates, and a record whose
+  // newline never landed. The first needs the surviving-chain planner, the
+  // second only needs the torn tail dropped.
+  const variants = [
+    {
+      id: 'session-00000000-0000-4000-8000-0000000000gap',
+      label: 'seq regression with no later turn/end',
+      content: buildHiddenSeqGap(buildCleanLog('session-00000000-0000-4000-8000-0000000000gap', cwd, createdAt), createdAt),
+      events: 4,
+      dropped: 3,
+      tornBytes: 0,
+    },
+    {
+      id: 'session-00000000-0000-4000-8000-0000000000torn',
+      label: 'record without its closing newline',
+      content: buildTornRecord(buildCleanLog('session-00000000-0000-4000-8000-0000000000torn', cwd, createdAt)),
+      events: 6,
+      dropped: 0,
+      tornBytes: TORN_FRAGMENT.length,
+    },
+  ]
+  for (const variant of variants) {
+    const dir = join(sessionsRoot, projectKey(cwd), variant.id)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'session.jsonl.zstd'), __internals.encodeLog(variant.content, 'zstd'))
+
+    let before
+    try { await persistence.loadStored(variant.id) } catch (error) { before = error.message }
+    expect(/complete frame contains a torn JSONL record/.test(before ?? ''),
+      `${variant.label}: loader must report the torn-record signature, got: ${before}`)
+
+    const scan = await callTool('dsh_session_repair_scan', { session: variant.id })
+    expect(scan.includes(variant.id) && scan.includes('corrupt'),
+      `${variant.label}: scan must list it as corrupt: ${scan}`)
+
+    const preview = await callTool('dsh_session_repair_apply', { session: variant.id, dryRun: true })
+    expect(preview.includes('[dry run]') && !preview.includes('backup:'), `${variant.label}: dry run must not publish`)
+
+    const applied = await callTool('dsh_session_repair_apply', { session: variant.id })
+    expect(applied.includes('✓'), `${variant.label}: repair must succeed: ${applied}`)
+    expect(applied.includes(`→ ${variant.events} events`), `${variant.label}: expected ${variant.events} events: ${applied}`)
+    expect(applied.includes(`dropped ${variant.dropped} row(s)`), `${variant.label}: expected ${variant.dropped} dropped rows: ${applied}`)
+    if (variant.tornBytes > 0) {
+      expect(applied.includes(`${variant.tornBytes}-byte torn tail`), `${variant.label}: must report the torn tail: ${applied}`)
+    }
+
+    const stored = await persistence.loadStored(variant.id)
+    expect(stored.events.length === variant.events, `${variant.label}: backend must load ${variant.events} events, got ${stored.events.length}`)
+    expect(stored.tornMarker === undefined, `${variant.label}: repaired log must not carry a torn marker`)
+    const again = await callTool('dsh_session_repair_apply', { session: variant.id })
+    expect(again.includes('无冲突') || again.includes('clean'), `${variant.label}: second repair must be a no-op: ${again}`)
+    console.log(`variant ok: ${variant.label} — ${variant.events} events, ${variant.dropped} dropped row(s), ${variant.tornBytes} torn byte(s)`)
+  }
+
   // ── 4. Fenced HTTP route ──────────────────────────────────────────────
   const invoke = async ({ method = 'POST', headers = {}, body = '' }) => {
     const chunks = body === '' ? [] : [Buffer.from(body)]
@@ -256,8 +339,10 @@ try {
 
   const scanResponse = await invoke({ body: JSON.stringify({ op: 'scan' }) })
   const scanEnvelope = JSON.parse(scanResponse.body)
-  expect(scanEnvelope.value.total === 1, `scan must see 1 session, got ${scanEnvelope.value.total}`)
+  expect(scanEnvelope.value.total === 3, `scan must see 3 sessions, got ${scanEnvelope.value.total}`)
   expect(scanEnvelope.value.corrupt === 0, 'scan must find nothing corrupt after repair')
+  expect(scanEnvelope.value.sessions.every(session => session.status === 'ok'),
+    `every repaired session must scan as ok: ${JSON.stringify(scanEnvelope.value.sessions)}`)
 
   const badBody = await invoke({ body: '{not json' })
   expect(badBody.status === 400, `malformed body must answer 400, got ${badBody.status}`)

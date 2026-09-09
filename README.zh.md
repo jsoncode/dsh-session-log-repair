@@ -4,9 +4,10 @@
   <img src="assets/logo.svg" alt="dsh-session-repair logo" width="120" />
 </p>
 
-**dsh-session-repair** 是 DeepSeek Harness (DSH) 插件，用于修复**提交区 seq 冲突**的
-会话日志 —— 也就是 Web GUI 里 `历史加载失败` / `failed to observe session … corrupt
-session log: seq gap in committed region at line N (expected X, got Y)` 的成因。
+**dsh-session-repair** 是 DeepSeek Harness (DSH) 插件，用于修复**提交区 seq 冲突**与
+**末尾半条记录**的会话日志 —— 也就是 Web GUI 里 `历史加载失败` / `failed to observe
+session … corrupt session log: seq gap in committed region …` 或 `corrupt Zstandard
+session log: complete frame contains a torn JSONL record` 的成因。
 
 - **一键修复** —— 侧边栏底部按钮打开弹框，扫描全部会话并修复，支持单个与全部
 - **安全优先** —— 拒绝本进程内活动会话、写前复检 size+mtime、自动备份、原子发布、
@@ -26,17 +27,28 @@ DSH 会话日志是拼接多帧 zstd 的 JSONL，加载器要求每一行的 `se
 进程 resume 同一会话并写入崩溃修复事件，卡住的进程醒来后用旧计数器追加 ——
 两行不同的事件会占用同一批 `seq`，加载器随即拒绝整个日志，会话打不开。
 
+两种加载器报错都能修：
+
+| 加载器报错 | 含义 |
+|---|---|
+| `corrupt session log: seq gap in committed region at line N (expected X, got Y)` | 撞车行，且其后有 `turn/end` 触发精确报错 |
+| `corrupt Zstandard session log: complete frame contains a torn JSONL record` | 撞车行之后没有 `turn/end`（扫描器只记 issue 不升级），**或**一条记录的换行符没落盘，留在完整帧里 |
+
 修复保留**存活链**、丢弃重叠的旧版本：
 
-1. 从文件末尾反向走，找出抵达末尾的最大稠密连续段（写出日志其余部分的那个写入者）；
-2. 向前延伸：结束位置恰好接上链起点的行并入，范围探入链内的行判为重复版本丢弃；
-3. 遇到真实缺口就停止，剩余部分必须是稠密前缀，否则**拒绝修复**而不是猜；
-4. 插件识别的合成事件指纹（`turn/end` 的 `reason.kind: 'interrupted'`、紧随的
+1. 先丢掉末尾缺换行的半条记录 —— 它从未成为事件，不会丢事件；
+2. 从文件末尾反向走，找出抵达末尾的最大稠密连续段（写出日志其余部分的那个写入者）；
+3. 向前延伸：结束位置恰好接上链起点的行并入，范围探入链内的行判为重复版本丢弃；
+4. 遇到真实缺口就停止，剩余部分必须是稠密前缀，否则**拒绝修复**而不是猜；
+5. 插件识别的合成事件指纹（`turn/end` 的 `reason.kind: 'interrupted'`、紧随的
    `step/end`、`interrupted-tool-result-*`、`session/end-seed` resume 标记）只会
    因为「与存活链重叠」被丢弃，绝不因为标签被丢弃。
 
 判定不依赖「谁是修复版本」，因此两个版本都是真实写入时同样成立。`seq` 不重编号，
 修复后保留存活写入者的编号。
+
+两类情况明确拒绝：**真缺行**（`got > expected`）与**结构上不完整的尾帧**
+（加载器自己会恢复其中的完整记录）。
 
 ## 功能
 

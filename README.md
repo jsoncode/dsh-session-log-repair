@@ -5,9 +5,10 @@
 </p>
 
 **dsh-session-repair** is a DeepSeek Harness (DSH) plugin that repairs session
-logs whose **committed region has a `seq` collision** — the failure behind the
-Web GUI's `历史加载失败` / `failed to observe session … corrupt session log: seq
-gap in committed region at line N (expected X, got Y)`.
+logs whose **committed region has a `seq` collision** or a **torn trailing
+record** — the failures behind the Web GUI's `历史加载失败` / `failed to observe
+session … corrupt session log: seq gap in committed region …` and `corrupt
+Zstandard session log: complete frame contains a torn JSONL record`.
 
 - **One-click repair** — a footer button opens a dialog that scans every stored
   session and repairs the corrupt ones, with per-session and repair-all actions
@@ -35,15 +36,24 @@ repair — the woken writer appends with a stale counter and two different rows
 claim the same `seq` values. The loader then refuses the whole log and the
 session cannot be opened.
 
+Two loader messages are repaired:
+
+| Loader message | What it means |
+|---|---|
+| `corrupt session log: seq gap in committed region at line N (expected X, got Y)` | a colliding row, and a later row carries `turn/end` |
+| `corrupt Zstandard session log: complete frame contains a torn JSONL record` | the colliding row has no later `turn/end` (the scanner records the issue without escalating it), **or** a record's newline never landed inside an otherwise complete frame |
+
 Repair keeps the **surviving chain** and drops the overlapping older version:
 
-1. walk back from the end of the file to find the maximal dense run that reaches
+1. a trailing record without its newline is removed first — it never became an
+   event, so no event is lost;
+2. walk back from the end of the file to find the maximal dense run that reaches
    it (the writer that produced the rest of the log);
-2. extend the chain backwards: a row ending exactly where the chain starts joins
+3. extend the chain backwards: a row ending exactly where the chain starts joins
    it, a row whose range reaches into the chain duplicates it and is dropped;
-3. a real gap stops the walk, and the remaining rows must form a dense prefix —
+4. a real gap stops the walk, and the remaining rows must form a dense prefix —
    otherwise the repair is refused instead of guessed;
-4. rows the plugin classifies as synthetic (`turn/end` with
+5. rows the plugin classifies as synthetic (`turn/end` with
    `reason.kind: 'interrupted'`, its `step/end`, `interrupted-tool-result-*`, a
    `session/end-seed` resume marker) are only ever dropped because they overlap
    the chain, never because of their label.
@@ -51,6 +61,9 @@ Repair keeps the **surviving chain** and drops the overlapping older version:
 The decision never depends on guessing which version is "the repair", so it also
 holds when both competing versions are real writes. `seq` values are never
 renumbered: the repaired log keeps the surviving writer's numbering.
+
+Two cases are deliberately refused: a **real gap** (`got > expected`) and a
+**structurally incomplete final frame**, which the loader recovers by itself.
 
 ## Features
 

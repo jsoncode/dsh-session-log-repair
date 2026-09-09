@@ -13,6 +13,13 @@
  * `seq === events.length` and refuses the whole log on the first violation, so a
  * single collision makes the session unloadable ("历史加载失败").
  *
+ * Two loader messages reach this tool:
+ *   - `seq gap in committed region at line N (expected X, got Y)` when the
+ *     colliding row or a later row carries `turn/end`;
+ *   - `complete frame contains a torn JSONL record` otherwise, and also when a
+ *     record's newline never landed inside an otherwise complete frame. The
+ *     second case needs only the trailing partial record removed.
+ *
  * Repair rule: the surviving tail is the maximal dense run that reaches the end
  * of the file — it belongs to the writer that produced the rest of the log. Every
  * earlier row whose seq range reaches into that tail's start seq duplicates it
@@ -98,13 +105,30 @@ function rowEvents(row, fileLine) {
   }
 }
 
-/** Split one frame's plaintext into complete JSONL records. */
-function frameLines(plaintext, frameIndex) {
+/**
+ * Split one frame's plaintext into complete JSONL records. Only the last
+ * complete frame may end mid-record: a later frame would have continued that
+ * record, so there a missing newline is a record split across frames, which this
+ * tool does not reconstruct.
+ * @param plaintext - the frame's decompressed bytes.
+ * @param frameIndex - frame ordinal, for diagnostics.
+ * @param isLast - whether this is the last complete frame in the file.
+ * @returns the frame's complete records.
+ */
+function frameLines(plaintext, frameIndex, isLast) {
   if (plaintext.length === 0) return []
-  if (plaintext[plaintext.length - 1] !== 0x0A) {
-    fail(`frame ${frameIndex} does not end on a line boundary; this log needs torn-tail handling, not seq-collision repair`)
+  let bytes = plaintext
+  if (bytes[bytes.length - 1] !== 0x0A) {
+    if (!isLast) {
+      fail(`frame ${frameIndex} does not end on a line boundary and a later frame follows; `
+        + 'this log splits a record across frames, which this tool does not reconstruct')
+    }
+    const lastNewline = bytes.lastIndexOf(0x0A)
+    if (lastNewline === -1) fail(`frame ${frameIndex} has no complete record`)
+    tornBytes = bytes.length - lastNewline - 1
+    bytes = bytes.subarray(0, lastNewline + 1)
   }
-  const lines = plaintext.toString('utf8').split('\n')
+  const lines = bytes.toString('utf8').split('\n')
   lines.pop()
   return lines
 }
@@ -137,8 +161,12 @@ const original = readFileSync(logPath)
 const { frames, tornStart } = scanZstdFrames(original)
 if (frames.length === 0) fail('no complete zstd frame found; not a DSH session log')
 if (tornStart !== undefined) {
-  fail(`the log has an incomplete final frame at byte ${tornStart}; recover the torn tail first (load/resume once), then rerun`)
+  fail(`the log has an incomplete final frame at byte ${tornStart}; open or resume the session once so the `
+    + 'writer flushes a complete frame, then rerun (this tool repairs complete frames only)')
 }
+
+/** Bytes dropped from the end of the last complete frame (a record without its newline). */
+let tornBytes = 0
 
 const plaintexts = []
 for (const range of frames) plaintexts.push(await decompressZstdFrame(original.subarray(range.start, range.end)))
@@ -153,7 +181,7 @@ const headerLine = plaintexts[0].toString('utf8')
 const rows = []
 let fileLine = 1
 for (let index = 1; index < plaintexts.length; index += 1) {
-  for (const line of frameLines(plaintexts[index], index)) {
+  for (const line of frameLines(plaintexts[index], index, index === plaintexts.length - 1)) {
     fileLine += 1
     let parsed
     try { parsed = JSON.parse(line) } catch (error) {
@@ -197,7 +225,7 @@ while (tailStart - 1 >= 0 && rows[tailStart - 1].end === S - 1) {
   tailStart -= 1
   S = rows[tailStart].base
 }
-if (tailStart === 0) {
+if (tailStart === 0 && tornBytes === 0) {
   console.log(`[clean] no seq collision: ${rows.length} rows, ${rows.reduce((t, r) => t + r.count, 0)} events, `
     + `max seq ${rows[rows.length - 1].end}`)
   process.exit(0)
@@ -243,7 +271,7 @@ if (stopIndex >= 0) {
   fail(`survivor chain starts at seq ${chainStart}, not 0; refusing to guess`)
 }
 
-if (dropped.length === 0) {
+if (dropped.length === 0 && tornBytes === 0) {
   console.log(`[clean] no seq collision: ${rows.length} rows, ${rows.reduce((t, r) => t + r.count, 0)} events, `
     + `max seq ${rows[rows.length - 1].end}`)
   process.exit(0)
@@ -275,7 +303,14 @@ const repaired = Buffer.concat(rebuiltFrames)
 /* ------------------------------------------------------------ 4. verify --- */
 
 let originalError
-try { scanLog(Buffer.concat(plaintexts)); originalError = undefined } catch (error) { originalError = error.message }
+const originalPlaintext = Buffer.concat(plaintexts)
+try {
+  const scan = scanLog(originalPlaintext)
+  // scanLog tolerates a trailing record without a newline; the loader does not.
+  originalError = scan.committedBytes === originalPlaintext.length
+    ? undefined
+    : 'corrupt Zstandard session log: complete frame contains a torn JSONL record'
+} catch (error) { originalError = error.message }
 
 let loaded
 try { loaded = scanLog(Buffer.from(keptPlaintext)) } catch (error) {
@@ -302,12 +337,13 @@ const describe = (row) => ({
 })
 const report = {
   file: logPath,
-  collision: {
+  collision: dropped.length === 0 ? undefined : {
     tailStartsAtSeq: S,
     survivorChainStartsAtSeq: chainStart,
     droppedSeqs: [Math.min(...dropped.map(row => row.base)), Math.max(...dropped.map(row => row.end))],
     droppedRows: dropped.length,
   },
+  tornTailBytes: tornBytes,
   survivor: describe(rows[tailStart]),
   dropped: dropped.map(describe),
   bytes: { before: original.length, after: repaired.length },
@@ -320,11 +356,14 @@ const report = {
 
 if (!args.json) {
   console.log(`file            ${logPath}`)
-  console.log(`original error  ${originalError}`)
+  console.log(`original error  ${originalError ?? '(none reported by scanLog)'}`)
   console.log(`surviving tail  starts at seq ${S} with ${rows[tailStart].type} (time ${rows[tailStart].time})`)
   console.log(`frames          ${frames.length} -> ${recheck.frames.length}`)
   console.log(`events          ${report.events.before} -> ${events.length} (max seq ${events.length - 1})`)
   console.log(`bytes           ${original.length} -> ${repaired.length}`)
+  if (tornBytes > 0) {
+    console.log(`torn tail       ${tornBytes} byte(s) without a closing newline dropped from the last frame`)
+  }
   console.log(`\ndropped (${dropped.length} rows duplicating the surviving writer's chain):`)
   for (const row of report.dropped) {
     console.log(`  ${row.kind.padEnd(18)} frame ${String(row.frame).padStart(5)} / file line ${row.fileLine}: `
