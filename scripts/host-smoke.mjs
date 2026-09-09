@@ -1,34 +1,93 @@
 /**
- * dsh-session-repair — host-half integration test (development only).
+ * dsh-session-repair — host-half integration test.
  *
  * Runs the real plugin against the real persistence backend and a throwaway
- * sessions root: builds a corrupt fixture from a known-bad log, then drives
- * apply() → the registered tools and the fenced HTTP route.
+ * sessions root: builds a synthetic corrupt log (a stale writer re-appending a
+ * block), then drives apply() → the registered tools and the fenced HTTP route.
  *
- * Usage (plain Node; resolves host packages from the DSH profile):
- *   node scripts/host-smoke.mjs [corrupt.jsonl.zstd]
+ * Usage (plain Node; host packages resolve from the DSH profile, else from this
+ * package's devDependencies):
+ *   node scripts/host-smoke.mjs [real-corrupt.jsonl.zstd]
  */
 
-import { createRequire } from 'node:module'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve, basename } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { tmpdir } from 'node:os'
+import { join, basename, resolve } from 'node:path'
 
 import { __internals } from '../lib/index.js'
+import { hostImport } from './host-resolve.mjs'
 
-const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh')
-const source = process.argv[2]
-  ?? 'D:\\workspace\\custom\\.session-backups\\session-57608082-20260908-210635\\session-57608082-a453-4d97-80a5-d8c12a3e4945.jsonl.zstd.orig'
+/** Optional argv[2]: exercise a real corrupt log instead of the synthetic one. */
+const realLog = process.argv[2]
 
-const require = createRequire(join(DSH_HOME, 'profiles', 'web', 'package.json'))
-const load = async (specifier) => import(pathToFileURL(require.resolve(specifier)).href)
-
-const { Context } = await load('@deepseek-ai/cordis')
-const { JsonlSessionPersistence } = await load('@deepseek-ai/dsh-session-persistence-jsonl')
+const { Context } = await hostImport('@deepseek-ai/cordis')
+const { JsonlSessionPersistence } = await hostImport('@deepseek-ai/dsh-session-persistence-jsonl')
 
 const fail = (message) => { throw new Error(`HOST-SMOKE FAILED: ${message}`) }
 const expect = (condition, message) => { if (!condition) fail(message) }
+
+/**
+ * A minimal clean log with the same shape the host writes: a header line plus
+ * one committed event per line. The event types mirror a real resumed session.
+ * @param id - session id for the header.
+ * @param cwd - workspace path recorded in the header.
+ * @param createdAt - header timestamp in milliseconds.
+ * @returns the JSONL text of a clean, loadable session log.
+ */
+function buildCleanLog(id, cwd, createdAt) {
+  const header = { type: 'session', version: 0, id, createdAt, cwd, delegationDepth: 0, agentPreset: 'standard' }
+  const events = [
+    ['permission/preset', { preset: 'danger-full-access' }],
+    ['sandbox/mode', { mode: 'danger-full-access' }],
+    ['approval/policy', { policy: 'never' }],
+    ['session/end-seed', {}],
+    ['turn/start', { turn: 1 }],
+    ['turn/end', { reason: { kind: 'completed' } }],
+  ]
+  const lines = [JSON.stringify(header)]
+  events.forEach(([type, data], seq) => {
+    lines.push(JSON.stringify({ type, seq, time: createdAt + seq, data }))
+  })
+  return `${lines.join('\n')}\n`
+}
+
+/**
+ * Corrupt a clean log the way the real incidents looked: a stalled writer
+ * resumes and re-appends a block whose seqs collide with the committed tail.
+ * The tail block (seqs 4,5) then becomes the surviving chain, so the earlier
+ * rows 4,5 are the duplicates a correct repair must drop.
+ * @param clean - clean JSONL text (header + 6 rows).
+ * @param createdAt - timestamp used to keep the appended rows plausible.
+ * @returns the corrupted JSONL text.
+ */
+function buildStaleTail(clean, createdAt) {
+  const stale = [
+    { type: 'turn/start', seq: 4, time: createdAt + 100, data: { turn: 1 } },
+    { type: 'turn/end', seq: 5, time: createdAt + 101, data: { reason: { kind: 'completed' } } },
+  ]
+  return `${clean}${stale.map(event => JSON.stringify(event)).join('\n')}\n`
+}
+
+/**
+ * Reseed a real corrupt log: copy it into the throwaway root, read it through
+ * the backend, then rewrite the header id so the fixture has a fresh identity.
+ * @param file - path to the real corrupt log.
+ * @param id - the fixture session id.
+ * @returns the fixture JSONL text.
+ */
+async function reseedFromRealLog(file, id) {
+  const seedId = basename(file).split('.')[0]
+  const seedDir = join(sessionsRoot, '--fixture--', seedId)
+  mkdirSync(seedDir, { recursive: true })
+  copyFileSync(file, join(seedDir, 'session.jsonl.zstd'))
+  const seedRaw = await persistence.readRaw(seedId)
+  expect(seedRaw !== undefined, 'readRaw must find the seed copy')
+  const newline = seedRaw.content.indexOf('\n')
+  const header = JSON.parse(seedRaw.content.slice(0, newline))
+  header.id = id
+  rmSync(join(sessionsRoot, '--fixture--'), { recursive: true, force: true })
+  return `${JSON.stringify(header)}\n${seedRaw.content.slice(newline + 1)}`
+}
 
 /** Mirror of the backend's project directory encoding. */
 function projectKey(cwd) {
@@ -63,24 +122,19 @@ const persistence = new JsonlSessionPersistence(rootContext, { root: sessionsRoo
 
 try {
   // ── 1. Build the corrupt fixture through the real backend ──────────────
-  // readRaw(id) validates the header id against the request, so the seed copy
-  // keeps its own id and the fixture gets a fresh one afterwards.
-  const seedId = basename(source).split('.')[0]
-  const seedDir = join(sessionsRoot, '--fixture--', seedId)
-  mkdirSync(seedDir, { recursive: true })
-  copyFileSync(source, join(seedDir, 'session.jsonl.zstd'))
-  const seedRaw = await persistence.readRaw(seedId)
-  expect(seedRaw !== undefined, 'readRaw must find the seed copy')
-  const newline = seedRaw.content.indexOf('\n')
-  const header = JSON.parse(seedRaw.content.slice(0, newline))
   const fixtureId = 'session-00000000-0000-4000-8000-00000000fixme'
-  header.id = fixtureId
-  const fixtureContent = `${JSON.stringify(header)}\n${seedRaw.content.slice(newline + 1)}`
+  const createdAt = Date.now()
+  const cwd = join(workRoot, 'workspace')
+  mkdirSync(cwd, { recursive: true })
+  const clean = buildCleanLog(fixtureId, cwd, createdAt)
+  const fixtureContent = realLog === undefined
+    ? buildStaleTail(clean, createdAt)
+    : await reseedFromRealLog(realLog, fixtureId)
+  const header = JSON.parse(fixtureContent.slice(0, fixtureContent.indexOf('\n')))
   const fixtureDir = join(sessionsRoot, projectKey(String(header.cwd)), fixtureId)
   mkdirSync(fixtureDir, { recursive: true })
-  writeFileSync(join(fixtureDir, 'session.jsonl.zstd'), __internals.encodeLog(fixtureContent, 'zstd'))
-  rmSync(join(sessionsRoot, '--fixture--'), { recursive: true, force: true })
   const fixtureFile = join(fixtureDir, 'session.jsonl.zstd')
+  writeFileSync(fixtureFile, __internals.encodeLog(fixtureContent, 'zstd'))
 
   let seedError
   try { await persistence.loadStored(fixtureId) } catch (error) { seedError = error.message }
@@ -159,14 +213,15 @@ try {
 
   const applyText = await callTool('dsh_session_repair_apply', { session: fixtureId })
   expect(applyText.includes('✓'), `repair must succeed: ${applyText}`)
-  expect(applyText.includes('177309'), 'repair must report the repaired event count')
+  expect(applyText.includes('→ 6 events (max seq 5)'), `repair must report 6 dense events: ${applyText}`)
+  expect(applyText.includes('dropped 2 row(s)'), `repair must report the 2 dropped duplicates: ${applyText}`)
   console.log('repair tool:\n' + applyText.split('\n').map(line => '  ' + line).join('\n'))
 
   const backups = existsSync(backupRoot) ? readdirSync(backupRoot, { recursive: true }) : []
   expect(backups.some(entry => String(entry).endsWith('.orig')), 'a backup file must exist')
   const verifyText = await callTool('dsh_session_repair_verify', { session: fixtureId })
   expect(verifyText.includes('✓'), `verify must pass: ${verifyText}`)
-  expect(verifyText.includes('177309'), 'verify must report 177309 events')
+  expect(verifyText.includes('6 events'), `verify must report 6 events: ${verifyText}`)
   console.log('verify tool: ' + verifyText.split('\n')[0])
 
   // Idempotence: a second repair on the now-clean log must change nothing.

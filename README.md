@@ -1,13 +1,29 @@
 # dsh-session-repair
 
-One-click repair for DSH session logs whose **committed region has a seq
-collision** — the failure behind the Web GUI's `历史加载失败` /
-`failed to observe session … corrupt session log: seq gap in committed region at
-line N (expected X, got Y)`.
+<p align="center">
+  <img src="assets/logo.svg" alt="dsh-session-repair logo" width="120" />
+</p>
 
-The plugin adds a footer button with a repair dialog, three model tools, a
-`/dsh-session-repair` command, and a fenced HTTP route. No build step: the host
-half is plain ESM and the browser half is a hand-written module-loader bundle.
+**dsh-session-repair** is a DeepSeek Harness (DSH) plugin that repairs session
+logs whose **committed region has a `seq` collision** — the failure behind the
+Web GUI's `历史加载失败` / `failed to observe session … corrupt session log: seq
+gap in committed region at line N (expected X, got Y)`.
+
+- **One-click repair** — a footer button opens a dialog that scans every stored
+  session and repairs the corrupt ones, with per-session and repair-all actions
+- **Safe by construction** — refuses sessions that are live in this process,
+  re-checks the file (size + mtime) before publishing, backs up the original,
+  publishes atomically, then re-loads through the host backend
+- **Four surfaces** — Web GUI dialog, three model tools, the
+  `/dsh-session-repair` command, and a fenced HTTP route
+- **Ships its own skill** — installing the plugin registers the
+  `dsh-session-log-repair` skill (diagnosis doctrine + an offline script
+  toolkit that works even when DSH will not boot)
+- **Bilingual UI** — follows the host interface language (中文 / English)
+- **No build step** — the host half is plain ESM, the browser half is a
+  hand-written `__ModuleLoader__` bundle
+
+[中文文档](README.zh.md)
 
 ## What it repairs
 
@@ -36,26 +52,58 @@ The decision never depends on guessing which version is "the repair", so it also
 holds when both competing versions are real writes. `seq` values are never
 renumbered: the repaired log keeps the surviving writer's numbering.
 
-## Install
+## Features
 
-```sh
-node D:/workspace/custom/dsh-session-repair/scripts/install.mjs --profile web
+- **Footer entry** (`sidebar.footer.action`): a **会话修复 / Session repair**
+  button opens the repair dialog (`shell.overlay`). It lists every stored
+  session as `ok` / `corrupt` / `unreadable` / `torn` / `live`, and offers
+  per-session **修复** plus **一键修复全部**.
+- **Model tools**: `dsh_session_repair_scan`, `dsh_session_repair_apply`
+  (`session` / `all` / `dryRun` / `force`), `dsh_session_repair_verify`.
+- **Command**: `/dsh-session-repair {"op":"scan|repair|verify|status", …}`.
+- **HTTP route**: `POST /dsh-session-repair/api`, fenced to loopback/trusted
+  hosts with a same-origin marker, answering `{"ok":true,"value":…}`.
+- **Bundled skill**: `dsh-session-log-repair`, registered into `ctx.skills` on
+  boot (`source: bundled`) — see [Bundled skill](#bundled-skill).
+- **Config**: optional `backupRoot` / `sessionsRoot` overrides on the plugin's
+  own patch row.
+
+## Structure
+
+```
+├── lib/index.js          # Host half (plain ESM): codec, planner, ops, tools, route, skill
+├── lib/client.js         # Browser half: __ModuleLoader__ factory (footer button + dialog)
+├── skill/SKILL.md        # Bundled skill body: triage, container contract, algorithm
+├── skill/scripts/        # Offline toolkit (runs without a host): scan / repair / verify
+├── scripts/host-smoke.mjs    # Host-half integration test (real backend, synthetic corrupt log)
+├── scripts/client-smoke.mjs  # Browser-half render test (module-loader face, both slots)
+├── scripts/install-smoke.mjs # Installer regression test (duplicate entry id, idempotence)
+├── scripts/install.mjs       # Install / uninstall into a DSH profile
+├── scripts/host-resolve.mjs  # Host-package resolution shared by the tests
+├── cordis.patch.yml      # Bundle patch: inserts this package's loader row
+├── package.json          # dsh.bundle + dsh.client(web) manifests + peer/dev dependencies
+├── .github/workflows/    # ci.yml (tests) + release.yml (tag → GitHub Release)
+├── README.md             # This file (English)
+└── README.zh.md          # 中文文档
 ```
 
-The installer mirrors what `dsh plugin --profile web install <dir>` (and the
-desktop app's plugin page) does, so both agree:
+## Installation
 
-1. links this package into `<profile>/node_modules`;
-2. adds a `link:` dependency to the profile manifest;
-3. appends the package to `dsh.profile.bundles`.
+```sh
+# Local checkout (what this repo is for)
+dsh plugin --profile web add ./dsh-session-repair
 
-The boot then applies this package's own `cordis.patch.yml`, which inserts the
-loader row:
+# Then restart the host so the bundle layer mounts
+dsh --profile web --dump-config   # verify the layer: exactly one dsh-session-repair row
+dsh --profile web                 # start
+```
 
-```yaml
-- insert:
-    - id: dsh-session-repair
-      name: dsh-session-repair
+The equivalent installer in this repo performs the same three edits, then proves
+the result by composing the profile through the host's own loader:
+
+```sh
+node scripts/install.mjs --profile web            # install + verify
+node scripts/install.mjs --profile web --uninstall
 ```
 
 **One plugin, one enablement mechanism.** Do not also add an insert row to the
@@ -63,41 +111,15 @@ profile's `cordis.patch.yml`: the bundle layer already inserts the same entry id
 and two rows sharing one id abort the boot with
 `duplicate loader entry id: dsh-session-repair`. The installer strips any such
 row it finds (keeping the user layer a valid YAML array), then composes the
-profile through the host's own loader to prove exactly one row remains.
-
-Restart the host so the bundle layer mounts, and refresh the browser page for
-the client bundle. Remove everything with `… install.mjs --profile web
---uninstall`.
+profile through the host's loader to prove exactly one row remains.
 
 A bundle-layer row mounts during the initial tree load, before the webserver
 service exists, so the plugin reaches `webServer`, `commands`, and `skills`
 through `ctx.inject([…])` instead of a one-shot `ctx.get` — otherwise the route
 would be silently skipped on every boot.
 
-## Bundled skill
-
-Installing the plugin also activates the **`dsh-session-log-repair` skill**: the
-host half registers it into `ctx.skills` (source `bundled`, resource base
-`skill/`), so it appears in the model's skill catalog and loads through the
-`skill` tool — no separate `~/.agents/skills` install.
-
-`skill/SKILL.md` is the doctrine (symptom triage, the log container contract,
-root-cause fingerprints, the surviving-chain rule, host-side hardening
-proposals, source index). `skill/scripts/` holds the offline toolkit, which runs
-**without a running host** — the path to use when DSH itself will not boot:
-
-```sh
-cd <deepseek-harness checkout>
-node --import tsx/esm D:/workspace/custom/dsh-session-repair/skill/scripts/repair-all-sessions.mjs --dry-run
-```
-
-| Script | Purpose |
-| --- | --- |
-| `skill/scripts/scan-sessions.mjs` | read-only scan of `~/.dsh/sessions` |
-| `skill/scripts/repair-all-sessions.mjs` | scan + repair every unheld session (`--dry-run`, `--backup-dir`) |
-| `skill/scripts/repair-session-log.mjs` | one session: diagnose, `--apply` to write |
-| `skill/scripts/verify-repaired-session.mjs` | re-load through the real loader and projections |
-| `skill/scripts/host-resolver.mjs` | bare-dependency resolution fallback for the pnpm layout |
+Restart the host so the bundle layer mounts, and refresh the browser page for
+the client bundle.
 
 ## Use
 
@@ -113,7 +135,7 @@ per-session **修复** plus **一键修复全部**.
 | `dsh_session_repair_apply` | repair one session (`session`), every repairable session (`all: true`), or preview (`dryRun: true`) |
 | `dsh_session_repair_verify` | re-load through the host backend to confirm a repair |
 
-**Command** — `/dsh-session-repair {"op":"scan"}`, or `repair` / `verify` /
+**Command** — `/dsh-session-repair {"op":"scan"}`, plus `repair` / `verify` /
 `status` with the same JSON fields.
 
 **HTTP** — `POST /dsh-session-repair/api` with `{"op":"…"}`; the response is
@@ -138,6 +160,31 @@ same-origin marker.
   is reported instead of assumed.
 - The repair is idempotent: a clean log is never rewritten.
 
+## Bundled skill
+
+Installing the plugin also activates the **`dsh-session-log-repair` skill**: the
+host half registers it into `ctx.skills` (source `bundled`, resource base
+`skill/`), so it appears in the model's skill catalog and loads through the
+`skill` tool — no separate `~/.agents/skills` install.
+
+`skill/SKILL.md` is the doctrine (symptom triage, the log container contract,
+root-cause fingerprints, the surviving-chain rule, host-side hardening
+proposals, source index). `skill/scripts/` holds the offline toolkit, which runs
+**without a running host** — the path to use when DSH itself will not boot:
+
+```sh
+cd <deepseek-harness checkout>
+node --import tsx/esm <plugin>/skill/scripts/repair-all-sessions.mjs --dry-run
+```
+
+| Script | Purpose |
+| --- | --- |
+| `skill/scripts/scan-sessions.mjs` | read-only scan of `~/.dsh/sessions` |
+| `skill/scripts/repair-all-sessions.mjs` | scan + repair every unheld session (`--dry-run`, `--backup-dir`) |
+| `skill/scripts/repair-session-log.mjs` | one session: diagnose, `--apply` to write |
+| `skill/scripts/verify-repaired-session.mjs` | re-load through the real loader and projections |
+| `skill/scripts/host-resolver.mjs` | bare-dependency resolution fallback for the pnpm layout |
+
 ## Configuration
 
 Optional plugin config, added to this package's own `cordis.patch.yml` row (the
@@ -152,17 +199,57 @@ bundle layer), never to the profile's user patch:
         sessionsRoot: D:/other/sessions         # default: the backend's configured root
 ```
 
-## Develop
+## Development
+
+Requirements: **Node ≥ 22.15 + pnpm 10** (the `packageManager` field pins the
+pnpm version). The test scripts need host packages, which resolve from a DSH
+profile first and from this package's devDependencies otherwise, so a clean
+checkout works:
 
 ```sh
-node scripts/host-smoke.mjs     # real backend + throwaway root: tools, route, fences, skill, fiber disposal
-node scripts/client-smoke.mjs   # module-loader face, slot registration, render
-node scripts/install-smoke.mjs  # installer migration (duplicate entry id) + idempotence + uninstall
-cd <deepseek-harness> && node --import tsx/esm scripts/selftest.mts <corrupt.jsonl.zstd>
+pnpm install       # devDependencies: @deepseek-ai/* host packages, react, react-dom
+npm test           # syntax check + all three smoke tests
+npm run test:host      # real backend + throwaway root: tools, route, fences, skill, fiber disposal
+npm run test:client    # module-loader face, slot registration, render
+npm run test:install   # installer migration (duplicate entry id) + idempotence + uninstall
+npm run check          # node --check every source file
 ```
 
-`scripts/make-corrupt-session.mts` builds a corrupt fixture under a sessions
-root (development only). `scripts/install.mjs --help` documents the installer
-flags. The plugin's own `scripts/` and the skill's `skill/scripts/` are separate
+`node scripts/host-smoke.mjs <real-corrupt.jsonl.zstd>` runs the same test
+against a real corrupt log instead of the synthetic one it builds by default.
+The plugin's own `scripts/` and the skill's `skill/scripts/` are separate
 directories on purpose: the former drives this package, the latter is the
 offline toolkit the skill body refers to.
+
+## Automated publishing
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| [`ci.yml`](.github/workflows/ci.yml) | push to `master`, pull requests, manual | Node 26 → `pnpm install --frozen-lockfile` → `npm test` |
+| [`release.yml`](.github/workflows/release.yml) | tag `v*` | same checks → `npm pack` → create a published GitHub Release with the tarball attached |
+
+```sh
+npm version patch -m "release: v%s" && git push --follow-tags
+```
+
+npm publishing is intentionally **not** enabled: the name `dsh-session-repair` is
+already taken on the registry by an unrelated project, so the package stays
+`private` and the release workflow publishes the GitHub Release only.
+
+## Implementation notes
+
+- The host half is plain ESM (`lib/index.js`), loaded through native Node ESM by
+  the host — no bundler, no build artifacts to keep in sync.
+- The browser half (`lib/client.js`) is a single `window.__ModuleLoader__.load`
+  factory that exports `{ name, inject, apply }`; `react` / `react-dom` stay
+  external and resolve from the host's module seed at runtime.
+- Peer dependencies (`@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-tools`) are
+  optional: the plugin works without them and reports `unsupported` when the
+  backend is not the JSONL one.
+- The official `deepseek-harness` project is **not modified**; everything uses
+  existing services (`tools`, `commands`, `skills`, `webServer`) and slots
+  (`sidebar.footer.action`, `shell.overlay`).
+
+## License
+
+MIT © jsoncode

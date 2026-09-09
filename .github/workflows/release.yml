@@ -1,0 +1,79 @@
+# 发布工作流：推送 v* tag 时触发
+# - release job：安装依赖（pnpm frozen-lockfile）→ 语法检查 + 三个冒烟测试 →
+#   打包（npm pack）→ 创建正式（非草稿）GitHub Release 并附上 tarball。
+#
+# 不发布 npm：registry 上的 `dsh-session-repair` 已被另一个无关项目占用，
+# 因此 package.json 保持 `private: true`，本仓库只发 GitHub Release。
+# 如需发布，请先把包改成 scoped 名字（例如 @jsoncode/dsh-session-repair），
+# 在 npmjs.com 配置 Trusted Publishing，然后取消下面 publish-npm job 的注释。
+#
+# 历史排障记录（勿删）：setup-node@v5 的 package-manager-cache 默认开启，会读取
+# package.json 的 packageManager 字段（pnpm@10.34.5）并执行 `pnpm store path` 定位缓存，
+# 而该步骤执行时 pnpm 尚未安装（node 26 不捆绑 corepack），于是报
+# "Unable to locate executable file: pnpm"。修复：显式 package-manager-cache: false。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 创建 GitHub Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          # 关闭自动缓存（见文件头说明）。
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npx --yes pnpm@10.34.5 install --frozen-lockfile
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Installer regression test
+        run: npm run test:install
+
+      - name: Client-half test
+        run: npm run test:client
+
+      - name: Host-half integration test
+        run: npm run test:host
+
+      - name: Pack tarball
+        run: npm pack
+
+      - name: Create GitHub Release (published, not draft)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            --verify-tag \
+            *.tgz
+
+  # publish-npm:
+  #   needs: release
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     id-token: write   # npm Trusted Publishing 通过 OIDC 验证
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: actions/setup-node@v5
+  #       with:
+  #         node-version: 26
+  #         package-manager-cache: false
+  #         registry-url: https://registry.npmjs.org
+  #     - run: npx --yes pnpm@10.34.5 install --frozen-lockfile
+  #     - run: npm publish --provenance --no-git-checks

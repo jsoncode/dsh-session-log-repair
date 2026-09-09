@@ -1,18 +1,30 @@
 {
   "name": "dsh-session-repair",
   "version": "0.1.0",
+  "author": "jsoncode",
+  "license": "MIT",
   "private": true,
   "description": "DSH session-log repair plugin: scan every stored session, detect seq collisions in the committed region, and repair them from a one-click Web UI, model tools, or the /dsh-session-repair command. Installing it also registers the bundled dsh-session-log-repair skill (offline doctrine and scripts).",
   "type": "module",
-  "license": "MIT",
+  "packageManager": "pnpm@10.34.5",
+  "repository": "github:jsoncode/dsh-session-repair",
+  "homepage": "https://github.com/jsoncode/dsh-session-repair#readme",
+  "bugs": {
+    "url": "https://github.com/jsoncode/dsh-session-repair/issues"
+  },
   "keywords": [
     "dsh-plugin",
     "dsh-session-repair",
     "dsh-session-log-repair",
     "dsh-skill",
+    "deepseek-harness",
     "session-log",
-    "repair"
+    "repair",
+    "jsoncode"
   ],
+  "engines": {
+    "node": ">=22.15"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": {
@@ -32,6 +44,15 @@
     "README.md",
     "README.zh.md"
   ],
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "npm run check && npm run test:install && npm run test:client && npm run test:host",
+    "test:host": "node scripts/host-smoke.mjs",
+    "test:client": "node scripts/client-smoke.mjs",
+    "test:install": "node scripts/install-smoke.mjs",
+    "install:profile": "node scripts/install.mjs --profile web",
+    "uninstall:profile": "node scripts/install.mjs --profile web --uninstall"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -58,7 +79,19 @@
       "optional": true
     }
   },
-  "engines": {
-    "node": ">=22.15"
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-app-boot": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-skill": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.1.2-rc.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "koffi"
+    ]
   }
 }

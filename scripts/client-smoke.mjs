@@ -1,10 +1,46 @@
-/** Render smoke test for the browser half (development only). */
+/**
+ * Render smoke test for the browser half.
+ *
+ * The bundle is a `window.__ModuleLoader__` factory: this harness plays the
+ * module table (react / react-dom come from the host's seed at runtime) and
+ * renders both slot components to static markup.
+ *
+ * Usage: node scripts/client-smoke.mjs
+ */
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 
-const require = createRequire('D:/workspace/custom/dsh-jenkins/package.json')
-const React = require('react')
-const server = require('react-dom/server')
+import { hostBases, packageBase } from './host-resolve.mjs'
+
+/**
+ * Load a react/react-dom pair from one base. The browser bundle receives react
+ * from the host's module seed, so the test only needs a *matching* pair: a
+ * profile can hoist a react-dom that does not match its react, which
+ * `react-dom/server` rejects outright.
+ * @returns `{ React, server }` from a single base.
+ */
+function loadReactPair() {
+  const failures = []
+  for (const base of [packageBase, ...hostBases()]) {
+    try {
+      const require = createRequire(base)
+      const React = require('react')
+      const server = require('react-dom/server')
+      const domVersion = require('react-dom/package.json').version
+      if (React.version !== domVersion) {
+        failures.push(`${base}: react ${React.version} does not match react-dom ${domVersion}`)
+        continue
+      }
+      return { React, server, require, base }
+    } catch (cause) {
+      failures.push(`${base}: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+  throw new Error(`cannot load a matching react/react-dom pair:\n${failures.map(line => `  ${line}`).join('\n')}`)
+}
+
+const { React, server, require, base } = loadReactPair()
+console.log('react pair:', base)
 const code = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
 let registration
