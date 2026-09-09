@@ -55,6 +55,8 @@ DSH 会话日志是拼接多帧 zstd 的 JSONL，加载器要求每一行的 `se
 - **侧边栏底部入口**（`sidebar.footer.action`）：「会话修复 / Session repair」按钮
   打开修复弹框（`shell.overlay`），列出全部会话的
   `ok` / `corrupt` / `unreadable` / `torn` / `live`，支持单个**修复**与**一键修复全部**。
+  按钮沿用宿主侧边栏的几何：宽模式 42px 行高 / 12px 圆角 / 28px 圆形徽标，窄栏
+  为 36px 圆形按钮，与同插槽的其它入口和设置按钮对齐。
 - **模型工具**：`dsh_session_log_repair_scan`、`dsh_session_log_repair_apply`
   （`session` / `all` / `dryRun` / `force`）、`dsh_session_log_repair_verify`。
 - **命令**：`/dsh-session-log-repair {"op":"scan|repair|verify|status", …}`。

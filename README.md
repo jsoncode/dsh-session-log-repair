@@ -70,7 +70,9 @@ Two cases are deliberately refused: a **real gap** (`got > expected`) and a
 - **Footer entry** (`sidebar.footer.action`): a **会话修复 / Session repair**
   button opens the repair dialog (`shell.overlay`). It lists every stored
   session as `ok` / `corrupt` / `unreadable` / `torn` / `live`, and offers
-  per-session **修复** plus **一键修复全部**.
+  per-session **修复** plus **一键修复全部**. The entry keeps the host sidebar
+  geometry — 42px row, 12px radius, 28px round badge, 36px circle in the rail —
+  so it lines up with the sibling footer entries and the settings trigger.
 - **Model tools**: `dsh_session_log_repair_scan`, `dsh_session_log_repair_apply`
   (`session` / `all` / `dryRun` / `force`), `dsh_session_log_repair_verify`.
 - **Command**: `/dsh-session-log-repair {"op":"scan|repair|verify|status", …}`.
