@@ -1,5 +1,5 @@
 /**
- * dsh-session-repair — host-half integration test.
+ * dsh-session-log-repair — host-half integration test.
  *
  * Runs the real plugin against the real persistence backend and a throwaway
  * sessions root: builds a synthetic corrupt log (a stale writer re-appending a
@@ -137,7 +137,7 @@ function projectKey(cwd) {
   return `--${(readable.replace(/^-+/, '') || 'root').slice(0, 251)}--`
 }
 
-const workRoot = mkdtempSync(join(tmpdir(), 'dsh-session-repair-'))
+const workRoot = mkdtempSync(join(tmpdir(), 'dsh-session-log-repair-'))
 const sessionsRoot = join(workRoot, 'sessions')
 const backupRoot = join(workRoot, 'backups')
 mkdirSync(sessionsRoot, { recursive: true })
@@ -207,9 +207,9 @@ try {
   await plugin.apply(ctx, { backupRoot })
 
   expect(tools.length === 3, `expected 3 tools, got ${tools.length}`)
-  expect(tools.map(tool => tool.name).join(',') === 'dsh_session_repair_scan,dsh_session_repair_apply,dsh_session_repair_verify', 'tool names')
-  expect(commands.length === 1 && commands[0].name === 'dsh-session-repair', 'command registered')
-  expect(routes.length === 1 && routes[0].path === '/dsh-session-repair/api', 'API route registered')
+  expect(tools.map(tool => tool.name).join(',') === 'dsh_session_log_repair_scan,dsh_session_log_repair_apply,dsh_session_log_repair_verify', 'tool names')
+  expect(commands.length === 1 && commands[0].name === 'dsh-session-log-repair', 'command registered')
+  expect(routes.length === 1 && routes[0].path === '/dsh-session-log-repair/api', 'API route registered')
   expect(skills.length === 1, `expected 1 bundled skill, got ${skills.length}`)
   const skill = skills[0]
   expect(skill.name === 'dsh-session-log-repair', `skill name: ${skill.name}`)
@@ -228,17 +228,17 @@ try {
   }
 
   // ── 3. Tools ──────────────────────────────────────────────────────────
-  const scanText = await callTool('dsh_session_repair_scan', {})
+  const scanText = await callTool('dsh_session_log_repair_scan', {})
   expect(scanText.includes(fixtureId), 'scan must list the fixture')
   expect(scanText.includes('corrupt'), 'scan must label the fixture corrupt')
   console.log('scan tool:\n' + scanText.split('\n').map(line => '  ' + line).join('\n'))
 
-  const dryText = await callTool('dsh_session_repair_apply', { session: fixtureId, dryRun: true })
+  const dryText = await callTool('dsh_session_log_repair_apply', { session: fixtureId, dryRun: true })
   expect(dryText.includes('[dry run]'), 'dry run must be labelled')
   expect(!dryText.includes('backup:'), 'dry run must not publish a backup')
   console.log('dry run tool:\n' + dryText.split('\n').map(line => '  ' + line).join('\n'))
 
-  const applyText = await callTool('dsh_session_repair_apply', { session: fixtureId })
+  const applyText = await callTool('dsh_session_log_repair_apply', { session: fixtureId })
   expect(applyText.includes('✓'), `repair must succeed: ${applyText}`)
   expect(applyText.includes('→ 6 events (max seq 5)'), `repair must report 6 dense events: ${applyText}`)
   expect(applyText.includes('dropped 2 row(s)'), `repair must report the 2 dropped duplicates: ${applyText}`)
@@ -246,13 +246,13 @@ try {
 
   const backups = existsSync(backupRoot) ? readdirSync(backupRoot, { recursive: true }) : []
   expect(backups.some(entry => String(entry).endsWith('.orig')), 'a backup file must exist')
-  const verifyText = await callTool('dsh_session_repair_verify', { session: fixtureId })
+  const verifyText = await callTool('dsh_session_log_repair_verify', { session: fixtureId })
   expect(verifyText.includes('✓'), `verify must pass: ${verifyText}`)
   expect(verifyText.includes('6 events'), `verify must report 6 events: ${verifyText}`)
   console.log('verify tool: ' + verifyText.split('\n')[0])
 
   // Idempotence: a second repair on the now-clean log must change nothing.
-  const againText = await callTool('dsh_session_repair_apply', { session: fixtureId })
+  const againText = await callTool('dsh_session_log_repair_apply', { session: fixtureId })
   expect(againText.includes('无冲突') || againText.includes('clean'), `second repair must be a no-op: ${againText}`)
   const sizeAfter = readFileSync(fixtureFile).length
 
@@ -289,14 +289,14 @@ try {
     expect(/complete frame contains a torn JSONL record/.test(before ?? ''),
       `${variant.label}: loader must report the torn-record signature, got: ${before}`)
 
-    const scan = await callTool('dsh_session_repair_scan', { session: variant.id })
+    const scan = await callTool('dsh_session_log_repair_scan', { session: variant.id })
     expect(scan.includes(variant.id) && scan.includes('corrupt'),
       `${variant.label}: scan must list it as corrupt: ${scan}`)
 
-    const preview = await callTool('dsh_session_repair_apply', { session: variant.id, dryRun: true })
+    const preview = await callTool('dsh_session_log_repair_apply', { session: variant.id, dryRun: true })
     expect(preview.includes('[dry run]') && !preview.includes('backup:'), `${variant.label}: dry run must not publish`)
 
-    const applied = await callTool('dsh_session_repair_apply', { session: variant.id })
+    const applied = await callTool('dsh_session_log_repair_apply', { session: variant.id })
     expect(applied.includes('✓'), `${variant.label}: repair must succeed: ${applied}`)
     expect(applied.includes(`→ ${variant.events} events`), `${variant.label}: expected ${variant.events} events: ${applied}`)
     expect(applied.includes(`dropped ${variant.dropped} row(s)`), `${variant.label}: expected ${variant.dropped} dropped rows: ${applied}`)
@@ -307,7 +307,7 @@ try {
     const stored = await persistence.loadStored(variant.id)
     expect(stored.events.length === variant.events, `${variant.label}: backend must load ${variant.events} events, got ${stored.events.length}`)
     expect(stored.tornMarker === undefined, `${variant.label}: repaired log must not carry a torn marker`)
-    const again = await callTool('dsh_session_repair_apply', { session: variant.id })
+    const again = await callTool('dsh_session_log_repair_apply', { session: variant.id })
     expect(again.includes('无冲突') || again.includes('clean'), `${variant.label}: second repair must be a no-op: ${again}`)
     console.log(`variant ok: ${variant.label} — ${variant.events} events, ${variant.dropped} dropped row(s), ${variant.tornBytes} torn byte(s)`)
   }
@@ -332,7 +332,7 @@ try {
   const statusResponse = await invoke({ body: JSON.stringify({ op: 'status' }) })
   expect(statusResponse.status === 200, `status route must answer 200, got ${statusResponse.status}`)
   const statusEnvelope = JSON.parse(statusResponse.body)
-  expect(statusEnvelope.value.api === '/dsh-session-repair/api', 'status must report the API path')
+  expect(statusEnvelope.value.api === '/dsh-session-log-repair/api', 'status must report the API path')
   expect(statusEnvelope.value.tools.length === 3, 'status must report all three tools as registered')
   expect(statusEnvelope.value.root === resolve(sessionsRoot), 'status must report the backend root')
   console.log('route status: ' + JSON.stringify(statusEnvelope.value))
@@ -444,7 +444,7 @@ try {
   late.webServer = { register: (route) => { bootRoutes.push(route); return () => {} } }
   late.skills = { register: (skill) => { bootSkills.push(skill); return () => {} } }
   for (const entry of parked.splice(0)) entry.callback(lateCtx)
-  expect(bootRoutes.length === 1 && bootRoutes[0].path === '/dsh-session-repair/api', 'parked route must register once webServer appears')
+  expect(bootRoutes.length === 1 && bootRoutes[0].path === '/dsh-session-log-repair/api', 'parked route must register once webServer appears')
   expect(bootSkills.length === 1 && bootSkills[0].name === 'dsh-session-log-repair', 'parked skill must register once skills appears')
   console.log('boot order: route + skill parked, then registered when their services appeared')
 

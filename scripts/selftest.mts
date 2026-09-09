@@ -1,5 +1,5 @@
 /**
- * dsh-session-repair — self test (development only).
+ * dsh-session-log-repair — self test (development only).
  *
  * Round-trips the pure repair planner over a real corrupt log:
  * decode frames (host source) → parse rows → plan → rebuild → re-encode with

@@ -101,25 +101,25 @@ frame contains a torn JSONL record（gateway/internal）
 
 ## 4. 修复流程
 
-本 skill 随插件 `dsh-session-repair` 一起分发：装好插件后，插件在宿主启动时把这个
+本 skill 随插件 `dsh-session-log-repair` 一起分发：装好插件后，插件在宿主启动时把这个
 skill 注册进 `ctx.skills`（`source: bundled`，`resourceBase` 就是本目录），因此**模型目录里
 自动出现**，无需另外安装到 `~/.agents/skills`。本文档正文（§1–§3、§6–§9）是离线诊断与
 成因知识；§4.0 是插件一键通道，§4.1 是本目录内脚本的离线通道。
 
-### 4.0 首选：`dsh-session-repair` 插件（一键，无需关 DSH）
+### 4.0 首选：`dsh-session-log-repair` 插件（一键，无需关 DSH）
 
-插件 `D:/workspace/custom/dsh-session-repair` 已装进 web profile：**只走 bundle 层**
+插件 `D:/workspace/custom/dsh-session-log-repair` 已装进 web profile：**只走 bundle 层**
 （`dsh.profile.bundles` 里一行 + 本包自己的 `cordis.patch.yml` 插入 entry）。三条等价入口：
 
 ```powershell
 # GUI：侧边栏底部「会话修复」→ 扫描 → 单个「修复」/「一键修复全部」
 
 # HTTP（围栏：仅 loopback/受信主机 + 同源）
-Invoke-WebRequest -Uri 'http://127.0.0.1:3080/dsh-session-repair/api' -Method POST `
+Invoke-WebRequest -Uri 'http://127.0.0.1:3080/dsh-session-log-repair/api' -Method POST `
   -ContentType 'application/json' -Body '{"op":"scan"}' -UseBasicParsing
 # body 的 op 可为 scan / repair / verify / status；repair 可带 session / all / dryRun / force
 
-# 模型工具：dsh_session_repair_scan / dsh_session_repair_apply / dsh_session_repair_verify
+# 模型工具：dsh_session_log_repair_scan / dsh_session_log_repair_apply / dsh_session_log_repair_verify
 ```
 
 插件用运行中的后端读取（`readRaw` + 宿主 `decodeStorageRecord`），规划后复检 size+mtime，
@@ -127,18 +127,18 @@ Invoke-WebRequest -Uri 'http://127.0.0.1:3080/dsh-session-repair/api' -Method PO
 最后用 `loadStored` 复检。**本进程内活动中的会话会被拒绝**（扫描标 `live` 跳过），
 所以不用先关 DSH —— 但也不能用它去改正在被本进程写入的会话（`force` 才覆盖，危险）。
 
-重装/卸载：`node D:/workspace/custom/dsh-session-repair/scripts/install.mjs --profile web [--uninstall]`。
+重装/卸载：`node D:/workspace/custom/dsh-session-log-repair/scripts/install.mjs --profile web [--uninstall]`。
 
 **启用路径只能有一条**：bundle 层（`dsh.profile.bundles` + 本包 patch）与用户 patch 层
 （profile 的 `cordis.patch.yml` insert）**同时**存在时，两行同 id 会让启动直接失败：
-`Error: dsh: plugin tree failed to load: ... duplicate loader entry id: dsh-session-repair`
+`Error: dsh: plugin tree failed to load: ... duplicate loader entry id: dsh-session-log-repair`
 （桌面端插件页 / `dsh plugin install` 会写 bundle 行，所以不要再手写用户 patch 行）。
 安装脚本会删掉残留的用户 patch 行、把该文件还原成合法 YAML 数组（注释-only 文件解析为
 null 也会让启动失败），再用宿主 `loadProfile` + `composeEntries` 组合一遍确认只剩 1 行。
 
 另一个已修的启动期坑：bundle 行在**树加载早期** apply，此时 `webServer` 服务尚未注册，
 一次性 `ctx.get('webServer')` 会拿到 undefined 并静默跳过路由（表现为 POST 到
-`/dsh-session-repair/api` 返回 405/404）。插件现在用 `ctx.inject(['webServer'], …)` /
+`/dsh-session-log-repair/api` 返回 405/404）。插件现在用 `ctx.inject(['webServer'], …)` /
 `ctx.inject(['commands'], …)` 等待服务就绪，`<插件>/scripts/host-smoke.mjs` 有专门的启动顺序用例。
 
 ### 4.1 后备：脚本流程（插件不可用时）
@@ -196,19 +196,19 @@ node --import tsx/esm "scripts/verify-repaired-session.mjs" --file $f
 
 ## 5. 工具说明
 
-**插件**（`D:/workspace/custom/dsh-session-repair`，推荐）：
+**插件**（`D:/workspace/custom/dsh-session-log-repair`，推荐）：
 
 | 入口 | 作用 |
 |---|---|
 | GUI 侧边栏「会话修复」 | 扫描 + 单个/全部一键修复（zh/en 跟随宿主 locale） |
-| `POST /dsh-session-repair/api` | `{"op":"scan\|repair\|verify\|status"}` → `{"ok":true,"value":…}` |
-| `dsh_session_repair_scan` | 列出 `ok` / `corrupt` / `unreadable` / `torn` / `live` |
-| `dsh_session_repair_apply` | `session` / `all` / `dryRun` / `force` |
-| `dsh_session_repair_verify` | 用宿主 `loadStored` 复检 |
+| `POST /dsh-session-log-repair/api` | `{"op":"scan\|repair\|verify\|status"}` → `{"ok":true,"value":…}` |
+| `dsh_session_log_repair_scan` | 列出 `ok` / `corrupt` / `unreadable` / `torn` / `live` |
+| `dsh_session_log_repair_apply` | `session` / `all` / `dryRun` / `force` |
+| `dsh_session_log_repair_verify` | 用宿主 `loadStored` 复检 |
 | `scripts/install.mjs` | 装/卸（junction + `link:` 依赖 + bundle 行）——在**插件包根目录**下执行 |
 
 **独立脚本**（本 skill 自带，只读宿主源码、可离线用；路径相对本 skill 目录
-`D:/workspace/custom/dsh-session-repair/skill/`，与插件的 `scripts/` 不是同一目录）：
+`D:/workspace/custom/dsh-session-log-repair/skill/`，与插件的 `scripts/` 不是同一目录）：
 
 | 文件 | 作用 |
 |---|---|

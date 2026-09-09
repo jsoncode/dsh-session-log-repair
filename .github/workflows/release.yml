@@ -2,10 +2,10 @@
 # - release job：安装依赖（pnpm frozen-lockfile）→ 语法检查 + 三个冒烟测试 →
 #   打包（npm pack）→ 创建正式（非草稿）GitHub Release 并附上 tarball。
 #
-# 不发布 npm：registry 上的 `dsh-session-repair` 已被另一个无关项目占用，
-# 因此 package.json 保持 `private: true`，本仓库只发 GitHub Release。
-# 如需发布，请先把包改成 scoped 名字（例如 @jsoncode/dsh-session-repair），
-# 在 npmjs.com 配置 Trusted Publishing，然后取消下面 publish-npm job 的注释。
+# 默认不发布 npm：registry 上的 `dsh-session-log-repair` 目前未被占用，但本仓库只发
+# GitHub Release；package.json 保持 `private: true`。
+# 如需发布：去掉 package.json 的 `private`，在 npmjs.com 配置 Trusted Publishing，
+# 然后取消下面 publish-npm job 的注释。
 #
 # 历史排障记录（勿删）：setup-node@v5 的 package-manager-cache 默认开启，会读取
 # package.json 的 packageManager 字段（pnpm@10.34.5）并执行 `pnpm store path` 定位缓存，

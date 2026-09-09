@@ -1,10 +1,10 @@
-# dsh-session-repair
+# dsh-session-log-repair
 
 <p align="center">
-  <img src="assets/logo.svg" alt="dsh-session-repair logo" width="120" />
+  <img src="assets/logo.svg" alt="dsh-session-log-repair logo" width="120" />
 </p>
 
-**dsh-session-repair** is a DeepSeek Harness (DSH) plugin that repairs session
+**dsh-session-log-repair** is a DeepSeek Harness (DSH) plugin that repairs session
 logs whose **committed region has a `seq` collision** or a **torn trailing
 record** — the failures behind the Web GUI's `历史加载失败` / `failed to observe
 session … corrupt session log: seq gap in committed region …` and `corrupt
@@ -16,7 +16,7 @@ Zstandard session log: complete frame contains a torn JSONL record`.
   re-checks the file (size + mtime) before publishing, backs up the original,
   publishes atomically, then re-loads through the host backend
 - **Four surfaces** — Web GUI dialog, three model tools, the
-  `/dsh-session-repair` command, and a fenced HTTP route
+  `/dsh-session-log-repair` command, and a fenced HTTP route
 - **Ships its own skill** — installing the plugin registers the
   `dsh-session-log-repair` skill (diagnosis doctrine + an offline script
   toolkit that works even when DSH will not boot)
@@ -71,10 +71,10 @@ Two cases are deliberately refused: a **real gap** (`got > expected`) and a
   button opens the repair dialog (`shell.overlay`). It lists every stored
   session as `ok` / `corrupt` / `unreadable` / `torn` / `live`, and offers
   per-session **修复** plus **一键修复全部**.
-- **Model tools**: `dsh_session_repair_scan`, `dsh_session_repair_apply`
-  (`session` / `all` / `dryRun` / `force`), `dsh_session_repair_verify`.
-- **Command**: `/dsh-session-repair {"op":"scan|repair|verify|status", …}`.
-- **HTTP route**: `POST /dsh-session-repair/api`, fenced to loopback/trusted
+- **Model tools**: `dsh_session_log_repair_scan`, `dsh_session_log_repair_apply`
+  (`session` / `all` / `dryRun` / `force`), `dsh_session_log_repair_verify`.
+- **Command**: `/dsh-session-log-repair {"op":"scan|repair|verify|status", …}`.
+- **HTTP route**: `POST /dsh-session-log-repair/api`, fenced to loopback/trusted
   hosts with a same-origin marker, answering `{"ok":true,"value":…}`.
 - **Bundled skill**: `dsh-session-log-repair`, registered into `ctx.skills` on
   boot (`source: bundled`) — see [Bundled skill](#bundled-skill).
@@ -104,10 +104,10 @@ Two cases are deliberately refused: a **real gap** (`got > expected`) and a
 
 ```sh
 # Local checkout (what this repo is for)
-dsh plugin --profile web add ./dsh-session-repair
+dsh plugin --profile web add ./dsh-session-log-repair
 
 # Then restart the host so the bundle layer mounts
-dsh --profile web --dump-config   # verify the layer: exactly one dsh-session-repair row
+dsh --profile web --dump-config   # verify the layer: exactly one dsh-session-log-repair row
 dsh --profile web                 # start
 ```
 
@@ -122,7 +122,7 @@ node scripts/install.mjs --profile web --uninstall
 **One plugin, one enablement mechanism.** Do not also add an insert row to the
 profile's `cordis.patch.yml`: the bundle layer already inserts the same entry id,
 and two rows sharing one id abort the boot with
-`duplicate loader entry id: dsh-session-repair`. The installer strips any such
+`duplicate loader entry id: dsh-session-log-repair`. The installer strips any such
 row it finds (keeping the user layer a valid YAML array), then composes the
 profile through the host's loader to prove exactly one row remains.
 
@@ -144,14 +144,14 @@ per-session **修复** plus **一键修复全部**.
 
 | Tool | Purpose |
 | --- | --- |
-| `dsh_session_repair_scan` | scan every stored log and report `ok` / `corrupt` / `unreadable` / `torn` / `live` |
-| `dsh_session_repair_apply` | repair one session (`session`), every repairable session (`all: true`), or preview (`dryRun: true`) |
-| `dsh_session_repair_verify` | re-load through the host backend to confirm a repair |
+| `dsh_session_log_repair_scan` | scan every stored log and report `ok` / `corrupt` / `unreadable` / `torn` / `live` |
+| `dsh_session_log_repair_apply` | repair one session (`session`), every repairable session (`all: true`), or preview (`dryRun: true`) |
+| `dsh_session_log_repair_verify` | re-load through the host backend to confirm a repair |
 
-**Command** — `/dsh-session-repair {"op":"scan"}`, plus `repair` / `verify` /
+**Command** — `/dsh-session-log-repair {"op":"scan"}`, plus `repair` / `verify` /
 `status` with the same JSON fields.
 
-**HTTP** — `POST /dsh-session-repair/api` with `{"op":"…"}`; the response is
+**HTTP** — `POST /dsh-session-log-repair/api` with `{"op":"…"}`; the response is
 `{"ok":true,"value":…}`. The route is fenced to loopback/trusted hosts with a
 same-origin marker.
 
@@ -205,8 +205,8 @@ bundle layer), never to the profile's user patch:
 
 ```yaml
 - insert:
-    - id: dsh-session-repair
-      name: dsh-session-repair
+    - id: dsh-session-log-repair
+      name: dsh-session-log-repair
       config:
         backupRoot: D:/backups/session-repair   # default $DSH_HOME/session-repair-backups/<id>-<ts>
         sessionsRoot: D:/other/sessions         # default: the backend's configured root
@@ -245,9 +245,11 @@ offline toolkit the skill body refers to.
 npm version patch -m "release: v%s" && git push --follow-tags
 ```
 
-npm publishing is intentionally **not** enabled: the name `dsh-session-repair` is
-already taken on the registry by an unrelated project, so the package stays
-`private` and the release workflow publishes the GitHub Release only.
+npm publishing is **available but off by default**: the registry name
+`dsh-session-log-repair` is free, yet the release workflow only creates the GitHub
+Release. To publish as well, uncomment the `publish-npm` job in
+[`release.yml`](.github/workflows/release.yml), add an `NPM_TOKEN` secret, and
+drop `"private": true` from `package.json`.
 
 ## Implementation notes
 

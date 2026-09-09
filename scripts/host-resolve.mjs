@@ -1,5 +1,5 @@
 /**
- * dsh-session-repair — host package resolution for the test scripts.
+ * dsh-session-log-repair — host package resolution for the test scripts.
  *
  * The tests must load the *same* host instances the running host uses, and they
  * must also run on a clean checkout (CI) where no DSH profile exists. Resolution

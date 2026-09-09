@@ -1,5 +1,5 @@
 /**
- * dsh-session-repair — syntax gate.
+ * dsh-session-log-repair — syntax gate.
  *
  * Runs `node --check` over every shipped `.js` / `.mjs` source file (the host
  * half, the browser half, the test scripts, and the bundled skill's offline

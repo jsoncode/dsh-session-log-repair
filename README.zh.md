@@ -1,10 +1,10 @@
-# dsh-session-repair
+# dsh-session-log-repair
 
 <p align="center">
-  <img src="assets/logo.svg" alt="dsh-session-repair logo" width="120" />
+  <img src="assets/logo.svg" alt="dsh-session-log-repair logo" width="120" />
 </p>
 
-**dsh-session-repair** 是 DeepSeek Harness (DSH) 插件，用于修复**提交区 seq 冲突**与
+**dsh-session-log-repair** 是 DeepSeek Harness (DSH) 插件，用于修复**提交区 seq 冲突**与
 **末尾半条记录**的会话日志 —— 也就是 Web GUI 里 `历史加载失败` / `failed to observe
 session … corrupt session log: seq gap in committed region …` 或 `corrupt Zstandard
 session log: complete frame contains a torn JSONL record` 的成因。
@@ -12,7 +12,7 @@ session log: complete frame contains a torn JSONL record` 的成因。
 - **一键修复** —— 侧边栏底部按钮打开弹框，扫描全部会话并修复，支持单个与全部
 - **安全优先** —— 拒绝本进程内活动会话、写前复检 size+mtime、自动备份、原子发布、
   发布后再用宿主后端复检
-- **四条入口** —— Web GUI 弹框、3 个模型工具、`/dsh-session-repair` 命令、带围栏的 HTTP 路由
+- **四条入口** —— Web GUI 弹框、3 个模型工具、`/dsh-session-log-repair` 命令、带围栏的 HTTP 路由
 - **自带 skill** —— 装上插件即注册 `dsh-session-log-repair` skill（诊断知识 + 离线脚本
   工具链，DSH 起不来时也能用）
 - **双语 UI** —— 跟随宿主界面语言（中文 / English）
@@ -55,10 +55,10 @@ DSH 会话日志是拼接多帧 zstd 的 JSONL，加载器要求每一行的 `se
 - **侧边栏底部入口**（`sidebar.footer.action`）：「会话修复 / Session repair」按钮
   打开修复弹框（`shell.overlay`），列出全部会话的
   `ok` / `corrupt` / `unreadable` / `torn` / `live`，支持单个**修复**与**一键修复全部**。
-- **模型工具**：`dsh_session_repair_scan`、`dsh_session_repair_apply`
-  （`session` / `all` / `dryRun` / `force`）、`dsh_session_repair_verify`。
-- **命令**：`/dsh-session-repair {"op":"scan|repair|verify|status", …}`。
-- **HTTP 路由**：`POST /dsh-session-repair/api`，围栏限定 loopback/受信主机 + 同源标记，
+- **模型工具**：`dsh_session_log_repair_scan`、`dsh_session_log_repair_apply`
+  （`session` / `all` / `dryRun` / `force`）、`dsh_session_log_repair_verify`。
+- **命令**：`/dsh-session-log-repair {"op":"scan|repair|verify|status", …}`。
+- **HTTP 路由**：`POST /dsh-session-log-repair/api`，围栏限定 loopback/受信主机 + 同源标记，
   返回 `{"ok":true,"value":…}`。
 - **自带 skill**：`dsh-session-log-repair`，启动时注册进 `ctx.skills`
   （`source: bundled`），详见 [随包 skill](#随包-skill)。
@@ -87,10 +87,10 @@ DSH 会话日志是拼接多帧 zstd 的 JSONL，加载器要求每一行的 `se
 
 ```sh
 # 本地检出（本仓库的用法）
-dsh plugin --profile web add ./dsh-session-repair
+dsh plugin --profile web add ./dsh-session-log-repair
 
 # 重启宿主让 bundle 层挂载
-dsh --profile web --dump-config   # 验证：只有一行 dsh-session-repair
+dsh --profile web --dump-config   # 验证：只有一行 dsh-session-log-repair
 dsh --profile web                 # 启动
 ```
 
@@ -103,7 +103,7 @@ node scripts/install.mjs --profile web --uninstall
 
 **一个插件只能有一条启用路径。** 不要再往 profile 的 `cordis.patch.yml` 里加同样的
 insert 行：bundle 层已经插入了同一个 entry id，两行同 id 会让启动直接失败并报
-`duplicate loader entry id: dsh-session-repair`。安装脚本会删掉发现的这类行
+`duplicate loader entry id: dsh-session-log-repair`。安装脚本会删掉发现的这类行
 （并保证用户 patch 层仍是合法的 YAML 数组），再用宿主 loader 组合一遍确认只剩 1 行。
 
 bundle 层的行在**树加载早期**就 apply，此时 webserver 服务还没注册，所以插件通过
@@ -121,13 +121,13 @@ bundle 层的行在**树加载早期**就 apply，此时 webserver 服务还没�
 
 | 工具 | 作用 |
 | --- | --- |
-| `dsh_session_repair_scan` | 扫描全部日志，输出 `ok` / `corrupt` / `unreadable` / `torn` / `live` |
-| `dsh_session_repair_apply` | 修一个会话（`session`）、修全部（`all: true`）、或只预览（`dryRun: true`） |
-| `dsh_session_repair_verify` | 用宿主真实加载路径复检 |
+| `dsh_session_log_repair_scan` | 扫描全部日志，输出 `ok` / `corrupt` / `unreadable` / `torn` / `live` |
+| `dsh_session_log_repair_apply` | 修一个会话（`session`）、修全部（`all: true`）、或只预览（`dryRun: true`） |
+| `dsh_session_log_repair_verify` | 用宿主真实加载路径复检 |
 
-**命令** —— `/dsh-session-repair {"op":"scan"}`，`repair` / `verify` / `status` 用同样的 JSON 字段。
+**命令** —— `/dsh-session-log-repair {"op":"scan"}`，`repair` / `verify` / `status` 用同样的 JSON 字段。
 
-**HTTP** —— `POST /dsh-session-repair/api`，body `{"op":"…"}`，返回 `{"ok":true,"value":…}`；
+**HTTP** —— `POST /dsh-session-log-repair/api`，body `{"op":"…"}`，返回 `{"ok":true,"value":…}`；
 围栏限定 loopback/受信主机 + 同源标记。
 
 ## 安全边界
@@ -171,8 +171,8 @@ node --import tsx/esm <插件目录>/skill/scripts/repair-all-sessions.mjs --dry
 
 ```yaml
 - insert:
-    - id: dsh-session-repair
-      name: dsh-session-repair
+    - id: dsh-session-log-repair
+      name: dsh-session-log-repair
       config:
         backupRoot: D:/backups/session-repair   # 默认 $DSH_HOME/session-repair-backups/<id>-<时间戳>
         sessionsRoot: D:/other/sessions         # 默认取后端配置的 root
@@ -207,8 +207,9 @@ npm run check          # 对每个源文件跑 node --check
 npm version patch -m "release: v%s" && git push --follow-tags
 ```
 
-**刻意不发布 npm**：`dsh-session-repair` 这个名字已被另一个无关项目占用，因此本包保持
-`private`，release 工作流只发 GitHub Release。
+**默认不发 npm**：registry 上的 `dsh-session-log-repair` 目前未被占用，但本仓库只发 GitHub
+Release。要同时发 npm：取消 [`release.yml`](.github/workflows/release.yml) 里 `publish-npm`
+job 的注释、配置 `NPM_TOKEN`，并去掉 `package.json` 的 `"private": true`。
 
 ## 实现说明
 

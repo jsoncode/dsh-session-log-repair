@@ -1,20 +1,20 @@
 /**
- * dsh-session-repair — installer (host-side, no build step).
+ * dsh-session-log-repair — installer (host-side, no build step).
  *
  * Enables the plugin exactly the way `dsh plugin --profile web install <dir>`
  * does, so the desktop app's plugin page and this script agree:
  *
- *   1. `<profile>/node_modules/dsh-session-repair` -> this package (junction)
- *   2. `<profile>/package.json` -> dependencies["dsh-session-repair"] = "link:<dir>"
+ *   1. `<profile>/node_modules/dsh-session-log-repair` -> this package (junction)
+ *   2. `<profile>/package.json` -> dependencies["dsh-session-log-repair"] = "link:<dir>"
  *      (the boot heals the profile's node_modules mirror from declared deps)
- *   3. `<profile>/package.json` -> dsh.profile.bundles += "dsh-session-repair"
+ *   3. `<profile>/package.json` -> dsh.profile.bundles += "dsh-session-log-repair"
  *      the boot then applies THIS package's own cordis.patch.yml, which inserts
  *      exactly one loader row.
  *
  * It also strips any insert row this plugin left in the profile's user patch
  * layer (`cordis.patch.yml`). Both layers insert the same entry id, and two
  * rows sharing one id abort the boot with
- * `duplicate loader entry id: dsh-session-repair` — which is exactly what
+ * `duplicate loader entry id: dsh-session-log-repair` — which is exactly what
  * happened when the desktop app added the bundle row while the user patch row
  * was still present. One plugin, one enablement mechanism.
  *
@@ -31,7 +31,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const PACKAGE_NAME = 'dsh-session-repair'
+const PACKAGE_NAME = 'dsh-session-log-repair'
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const rowPattern = new RegExp(`id:\\s*${PACKAGE_NAME}\\b`)
 
@@ -56,7 +56,7 @@ if (options.help) {
   console.log([
     `Usage: node scripts/install.mjs [--profile <name>] [--home <dsh-home>] [--uninstall] [--no-verify]`,
     '',
-    'Installs dsh-session-repair into a DSH profile the way',
+    'Installs dsh-session-log-repair into a DSH profile the way',
     '`dsh plugin --profile <name> install <dir>` does: node_modules link, link:',
     'dependency, and a dsh.profile.bundles row (the bundle patch inserts the',
     'loader row). Any user-patch insert for this plugin is removed, because two',
@@ -275,7 +275,7 @@ if (options.uninstall) {
     'Next:',
     '  - restart the host so the bundle layer mounts (a running process keeps its tree);',
     '  - refresh the browser page so the client bundle is picked up;',
-    '  - check it: POST http://127.0.0.1:3080/dsh-session-repair/api with {"op":"status"}.',
+    '  - check it: POST http://127.0.0.1:3080/dsh-session-log-repair/api with {"op":"status"}.',
     'Do not also add a row to cordis.patch.yml: that duplicates the entry id.',
   ].join('\n'))
 }

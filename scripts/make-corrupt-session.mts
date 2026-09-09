@@ -1,5 +1,5 @@
 /**
- * dsh-session-repair — build a synthetic corrupt session for end-to-end tests
+ * dsh-session-log-repair — build a synthetic corrupt session for end-to-end tests
  * (development only; never run against a real session id).
  *
  * Decodes a known-corrupt log, rewrites its header id, and stores it under the

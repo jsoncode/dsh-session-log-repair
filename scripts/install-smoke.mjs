@@ -1,8 +1,8 @@
 /**
- * dsh-session-repair — installer regression test (plain Node, no host needed).
+ * dsh-session-log-repair — installer regression test (plain Node, no host needed).
  *
  * Reproduces the state that aborted a real boot:
- *   Error: dsh: plugin tree failed to load: ... duplicate loader entry id: dsh-session-repair
+ *   Error: dsh: plugin tree failed to load: ... duplicate loader entry id: dsh-session-log-repair
  * The profile carried a user-patch insert row AND a `dsh.profile.bundles` row for
  * the same plugin, so both patch layers inserted the same entry id. The
  * installer must collapse that to the bundle layer alone, keep the user layer a
@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const PACKAGE_NAME = 'dsh-session-repair'
+const PACKAGE_NAME = 'dsh-session-log-repair'
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const installer = join(packageDir, 'scripts', 'install.mjs')
 
@@ -50,7 +50,7 @@ function makeBrokenProfile() {
     '# a top-level YAML array of loader patch entries (id-targeted config',
     '# overrides, disables, and insert lists; `!!js` expressions allowed).',
     '',
-    '# dsh-session-repair — one-click repair for session logs whose committed region',
+    '# dsh-session-log-repair — one-click repair for session logs whose committed region',
     '# has a seq collision (Web GUI: "历史加载失败 / corrupt session log").',
     '- insert:',
     `    - id: ${PACKAGE_NAME}`,

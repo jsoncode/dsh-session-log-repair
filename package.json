@@ -1,21 +1,21 @@
 {
-  "name": "dsh-session-repair",
+  "name": "dsh-session-log-repair",
   "version": "0.1.2",
   "author": "jsoncode",
   "license": "MIT",
   "private": true,
-  "description": "DSH session-log repair plugin: scan every stored session, detect seq collisions in the committed region, and repair them from a one-click Web UI, model tools, or the /dsh-session-repair command. Installing it also registers the bundled dsh-session-log-repair skill (offline doctrine and scripts).",
+  "description": "DSH session-log repair plugin: scan every stored session, detect a seq collision in the committed region or a torn trailing record, and repair it from a one-click Web UI, model tools, or the /dsh-session-log-repair command. Installing it also registers its bundled dsh-session-log-repair skill (offline doctrine and scripts).",
   "type": "module",
   "packageManager": "pnpm@10.34.5",
-  "repository": "github:jsoncode/dsh-session-repair",
-  "homepage": "https://github.com/jsoncode/dsh-session-repair#readme",
+  "repository": "github:jsoncode/dsh-session-log-repair",
+  "homepage": "https://github.com/jsoncode/dsh-session-log-repair#readme",
   "bugs": {
-    "url": "https://github.com/jsoncode/dsh-session-repair/issues"
+    "url": "https://github.com/jsoncode/dsh-session-log-repair/issues"
   },
   "keywords": [
     "dsh-plugin",
-    "dsh-session-repair",
     "dsh-session-log-repair",
+    "session-repair",
     "dsh-skill",
     "deepseek-harness",
     "session-log",
