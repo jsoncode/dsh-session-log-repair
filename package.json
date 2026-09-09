@@ -1,0 +1,64 @@
+{
+  "name": "dsh-session-repair",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH session-log repair plugin: scan every stored session, detect seq collisions in the committed region, and repair them from a one-click Web UI, model tools, or the /dsh-session-repair command. Installing it also registers the bundled dsh-session-log-repair skill (offline doctrine and scripts).",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "dsh-plugin",
+    "dsh-session-repair",
+    "dsh-session-log-repair",
+    "dsh-skill",
+    "session-log",
+    "repair"
+  ],
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./skill/*": "./skill/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "skill",
+    "assets/logo.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-cordis-client-runner"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-session": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.15"
+  }
+}

@@ -1,0 +1,15 @@
+# dsh-session-repair — installable bundle patch
+#
+# A bundle layer distributed by package name (module resolution resolves the
+# installed code), never by a relative source path. Enable it by adding
+# "dsh-session-repair" to $DSH_HOME/profiles/<profile>/package.json ->
+# dsh.profile.bundles (scripts/install.mjs does that), which is what
+# `dsh plugin --profile <profile> install <dir>` and the desktop app do.
+#
+# Do NOT also add the same insert to the profile's cordis.patch.yml: both layers
+# would insert one entry id, and the boot aborts with
+# `duplicate loader entry id: dsh-session-repair`.
+
+- insert:
+    - id: dsh-session-repair
+      name: dsh-session-repair
