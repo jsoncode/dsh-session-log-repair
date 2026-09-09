@@ -226,6 +226,7 @@ npm run test:host      # real backend + throwaway root: tools, route, fences, sk
 npm run test:client    # module-loader face, slot registration, render
 npm run test:install   # installer migration (duplicate entry id) + idempotence + uninstall
 npm run check          # node --check every source file
+npm run publish:npm    # npm test, then npm publish --access public
 ```
 
 `node scripts/host-smoke.mjs <real-corrupt.jsonl.zstd>` runs the same test
@@ -239,17 +240,22 @@ offline toolkit the skill body refers to.
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | [`ci.yml`](.github/workflows/ci.yml) | push to `master`, pull requests, manual | Node 26 → `pnpm install --frozen-lockfile` → `npm test` |
-| [`release.yml`](.github/workflows/release.yml) | tag `v*` | same checks → `npm pack` → create a published GitHub Release with the tarball attached |
+| [`release.yml`](.github/workflows/release.yml) | tag `v*` | same checks → `npm pack` → create a published GitHub Release with the tarball attached → `npm publish --provenance` through npm Trusted Publishing (OIDC) |
 
 ```sh
-npm version patch -m "release: v%s" && git push --follow-tags
+npm run release    # npm test && npm version patch && git push --follow-tags
 ```
 
-npm publishing is **available but off by default**: the registry name
-`dsh-session-log-repair` is free, yet the release workflow only creates the GitHub
-Release. To publish as well, uncomment the `publish-npm` job in
-[`release.yml`](.github/workflows/release.yml), add an `NPM_TOKEN` secret, and
-drop `"private": true` from `package.json`.
+The tag triggers `release.yml`, which publishes the GitHub Release **and** the
+npm package. npm uses **Trusted Publishing** (OIDC, `id-token: write`) with no
+long-lived token, matching `dsh-jenkins`.
+
+First release needs a one-time bootstrap: npm only offers the Trusted Publishing
+settings page for a package that already exists, so publish the first version
+from your machine with `npm run publish:npm` (or `npm login && npm publish
+--access public`), then add the trusted publisher on npmjs.com — repository
+`jsoncode/dsh-session-log-repair`, workflow `release.yml`. Every tag after that
+publishes automatically.
 
 ## Implementation notes
 

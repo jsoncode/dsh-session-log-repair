@@ -1,11 +1,12 @@
 # 发布工作流：推送 v* tag 时触发
 # - release job：安装依赖（pnpm frozen-lockfile）→ 语法检查 + 三个冒烟测试 →
-#   打包（npm pack）→ 创建正式（非草稿）GitHub Release 并附上 tarball。
+#   打包（npm pack）→ 创建正式（非草稿）GitHub Release 并附上 tarball →
+#   通过 OIDC 凭证（Trusted Publishing）发布至 npm。
 #
-# 默认不发布 npm：registry 上的 `dsh-session-log-repair` 目前未被占用，但本仓库只发
-# GitHub Release；package.json 保持 `private: true`。
-# 如需发布：去掉 package.json 的 `private`，在 npmjs.com 配置 Trusted Publishing，
-# 然后取消下面 publish-npm job 的注释。
+# 首次发布需一次性 bootstrap：npm 的 Trusted Publishing 只能在“包已存在”的页面上配置，
+# 所以第一个版本要先本地 `pnpm publish:npm`（或 `npm publish --access public`）发布，
+# 再到 npmjs.com 该包 → Settings → Trusted Publishing 填 GitHub 仓库
+# jsoncode/dsh-session-log-repair + 工作流文件名 release.yml，之后本工作流才能自动发版。
 #
 # 历史排障记录（勿删）：setup-node@v5 的 package-manager-cache 默认开启，会读取
 # package.json 的 packageManager 字段（pnpm@10.34.5）并执行 `pnpm store path` 定位缓存，
@@ -23,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write   # 创建 GitHub Release
+      id-token: write   # 必须！用于通过 OIDC 与 npm 进行身份安全验证
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -62,18 +64,8 @@ jobs:
             --verify-tag \
             *.tgz
 
-  # publish-npm:
-  #   needs: release
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: read
-  #     id-token: write   # npm Trusted Publishing 通过 OIDC 验证
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - uses: actions/setup-node@v5
-  #       with:
-  #         node-version: 26
-  #         package-manager-cache: false
-  #         registry-url: https://registry.npmjs.org
-  #     - run: npx --yes pnpm@10.34.5 install --frozen-lockfile
-  #     - run: npm publish --provenance --no-git-checks
+      - name: Publish to npm via Trusted Publishing
+        # 使用原生 npm 进行发布。--provenance 会把发布行为绑定到当前 GitHub Actions 的
+        # 工作流凭证上；--no-git-checks 跳过 npm publish 对工作区干净程度的检查
+        # （上游步骤已生成 *.tgz 产物）。与 dsh-jenkins 的 publish.yml 保持一致。
+        run: npm publish --provenance --no-git-checks

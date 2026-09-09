@@ -3,11 +3,14 @@
   "version": "0.2.0",
   "author": "jsoncode",
   "license": "MIT",
-  "private": true,
   "description": "DSH session-log repair plugin: scan every stored session, detect a seq collision in the committed region or a torn trailing record, and repair it from a one-click Web UI, model tools, or the /dsh-session-log-repair command. Installing it also registers its bundled dsh-session-log-repair skill (offline doctrine and scripts).",
   "type": "module",
   "packageManager": "pnpm@10.34.5",
   "repository": "github:jsoncode/dsh-session-log-repair",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "homepage": "https://github.com/jsoncode/dsh-session-log-repair#readme",
   "bugs": {
     "url": "https://github.com/jsoncode/dsh-session-log-repair/issues"
@@ -52,7 +55,8 @@
     "test:install": "node scripts/install-smoke.mjs",
     "install:profile": "node scripts/install.mjs --profile web",
     "uninstall:profile": "node scripts/install.mjs --profile web --uninstall",
-    "release": "npm test && npm version patch -m \"release: v%s\" && git push --follow-tags"
+    "release": "npm test && npm version patch -m \"release: v%s\" && git push --follow-tags",
+    "publish:npm": "npm test && npm publish --access public"
   },
   "dsh": {
     "bundle": {

@@ -190,6 +190,7 @@ npm run test:host      # 真实后端 + 临时目录：工具、路由、围栏�
 npm run test:client    # 模块加载器 face、插槽注册、渲染
 npm run test:install   # 安装脚本：重复 entry id 迁移 + 幂等 + 卸载
 npm run check          # 对每个源文件跑 node --check
+npm run publish:npm    # npm test 之后 npm publish --access public
 ```
 
 `node scripts/host-smoke.mjs <真实损坏日志.jsonl.zstd>` 可以改用真实损坏日志（默认用内置
@@ -201,15 +202,19 @@ npm run check          # 对每个源文件跑 node --check
 | 工作流 | 触发 | 内容 |
 | --- | --- | --- |
 | [`ci.yml`](.github/workflows/ci.yml) | push 到 `master`、PR、手动 | Node 26 → `pnpm install --frozen-lockfile` → `npm test` |
-| [`release.yml`](.github/workflows/release.yml) | 打 `v*` tag | 同样的检查 → `npm pack` → 创建正式 GitHub Release 并附 tarball |
+| [`release.yml`](.github/workflows/release.yml) | 打 `v*` tag | 同样的检查 → `npm pack` → 创建正式 GitHub Release 并附 tarball → 通过 npm Trusted Publishing（OIDC）执行 `npm publish --provenance` |
 
 ```sh
-npm version patch -m "release: v%s" && git push --follow-tags
+npm run release    # npm test && npm version patch && git push --follow-tags
 ```
 
-**默认不发 npm**：registry 上的 `dsh-session-log-repair` 目前未被占用，但本仓库只发 GitHub
-Release。要同时发 npm：取消 [`release.yml`](.github/workflows/release.yml) 里 `publish-npm`
-job 的注释、配置 `NPM_TOKEN`，并去掉 `package.json` 的 `"private": true`。
+tag 会触发 `release.yml`：既创建 GitHub Release，也发布 npm 包。npm 走 **Trusted
+Publishing**（OIDC，`id-token: write`），不存长期 token，与 `dsh-jenkins` 一致。
+
+**首次发布需一次性 bootstrap**：npm 的 Trusted Publishing 设置页只对「已存在的包」开放，
+所以第一个版本要先在本机执行 `npm run publish:npm`（或 `npm login && npm publish
+--access public`）发布，再到 npmjs.com 该包 → Settings → Trusted Publishing 填仓库
+`jsoncode/dsh-session-log-repair` 与工作流文件名 `release.yml`。此后每次打 tag 都会自动发版。
 
 ## 实现说明
 
